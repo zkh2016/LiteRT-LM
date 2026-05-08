@@ -14,6 +14,7 @@
 
 #include "runtime/conversation/model_data_processor/gemma4_data_processor.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <deque>
 #include <memory>
@@ -366,10 +367,24 @@ Gemma4DataProcessor::ToInputDataVectorImpl(
   const char* start = prompt_view.data();
   std::string part;
   ImagePreprocessParameter image_params;
+
+  int max_num_patches = config_.max_num_patches;
+  if (args.visual_token_budget) {
+    int visual_token_budget = args.visual_token_budget.value();
+    if (visual_token_budget <= 0) {
+      return absl::InvalidArgumentError(
+          "Visual token budget must be positive.");
+    }
+    // There is a 9:1 ratio between the number of patches and the visual token
+    // budget, because of the pooling operation of (3x3=9) patches in the image
+    // encoder.
+    max_num_patches = std::min(max_num_patches, visual_token_budget * 9);
+  }
+
   image_params.SetPatchifyConfig(ImagePreprocessParameter::PatchifyConfig{
       .patch_width = config_.patch_width,
       .patch_height = config_.patch_height,
-      .max_num_patches = args.max_num_patches.value_or(config_.max_num_patches),
+      .max_num_patches = max_num_patches,
       .pooling_kernel_size = config_.pooling_kernel_size});
   // Replace the placeholders with the actual data.
   while (RE2::FindAndConsume(&prompt_view, re_delimiter, &part)) {
