@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import http.server
 import io
+import socket
 
 import click
 
@@ -44,6 +45,9 @@ class LiteRTLMServer(http.server.HTTPServer):
       server_address: tuple[str, int],
       RequestHandlerClass: type[http.server.BaseHTTPRequestHandler],
   ):
+    host, _ = server_address
+    if ":" in host:
+      self.address_family = socket.AF_INET6
     super().__init__(server_address, RequestHandlerClass)
     self.litert_lm_engine: litert_lm.Engine | None = None
     self.model_id: str | None = None

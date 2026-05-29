@@ -14,6 +14,8 @@
 
 """Unit tests for the LiteRT-LM serve command."""
 
+import http.server
+import socket
 import sys
 from unittest import mock
 
@@ -605,6 +607,24 @@ class ServeTest(parameterized.TestCase):
       self.assertIsNotNone(match)
     else:
       self.assertIsNone(match)
+
+  @mock.patch.object(http.server.HTTPServer, "__init__", autospec=True)
+  def test_litert_lm_server_ipv6(self, mock_super_init):
+    serve_util.LiteRTLMServer(("::1", 8000), mock.MagicMock())
+    mock_super_init.assert_called_once()
+    args, _ = mock_super_init.call_args
+    self_arg, _, _ = args
+    self.assertEqual(self_arg.address_family, socket.AF_INET6)
+
+  @mock.patch.object(http.server.HTTPServer, "__init__", autospec=True)
+  def test_litert_lm_server_ipv4(self, mock_super_init):
+    serve_util.LiteRTLMServer(("127.0.0.1", 8000), mock.MagicMock())
+    mock_super_init.assert_called_once()
+    args, _ = mock_super_init.call_args
+    self_arg, _, _ = args
+    self.assertEqual(
+        getattr(self_arg, "address_family", socket.AF_INET), socket.AF_INET
+    )
 
 
 if __name__ == "__main__":
