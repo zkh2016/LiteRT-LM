@@ -525,6 +525,10 @@ class AbstractBenchmark(abc.ABC):
         it.
       bos_token_id: The BOS token id for the model if one is configured.
       eos_token_ids: Stop token sequences configured for the model.
+      prompt: The custom prompt string to tokenize and run. If the tokenized
+        prompt is shorter than `prefill_tokens`, the remaining tokens are
+        padded with zero. If it is longer, the prompt is truncated to
+        `prefill_tokens`.
   """
 
   model_path: str
@@ -534,6 +538,7 @@ class AbstractBenchmark(abc.ABC):
   max_num_tokens: int | None = None
   cache_dir: str = ""
   enable_speculative_decoding: bool | None = None
+  prompt: str = "How are you"
 
   @abc.abstractmethod
   def run(self) -> BenchmarkInfo:

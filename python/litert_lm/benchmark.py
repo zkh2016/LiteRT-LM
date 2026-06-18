@@ -80,13 +80,13 @@ class Benchmark(interfaces.AbstractBenchmark):
           f"Failed to create session for benchmark (model_path={model_path})"
       )
 
-    dummy_prompt = b"benchmark"
+    prompt = self.prompt.encode("utf-8")
     input_data = LiteRtLmInputData()
     input_data.type = InputDataType.TEXT
     input_data.data = ctypes.cast(
-        ctypes.c_char_p(dummy_prompt), ctypes.c_void_p
+        ctypes.c_char_p(prompt), ctypes.c_void_p
     )
-    input_data.size = len(dummy_prompt)
+    input_data.size = len(prompt)
 
     responses = lib.litert_lm_session_generate_content(
         session_ptr, ctypes.byref(input_data), 1
