@@ -120,6 +120,30 @@ def _parse_thinking_config(
   )
 
 
+def _compute_token_usage(conv: litert_lm.Conversation) -> dict[str, Any]:
+  """Computes token usage statistics for the completed conversation turn."""
+  prompt_tokens = 0
+  completion_tokens = 0
+
+  try:
+    info = conv.get_benchmark_info()
+    prompt_tokens = info.last_prefill_token_count
+    completion_tokens = info.last_decode_token_count
+  except Exception:  # pylint: disable=broad-exception-caught
+    pass
+
+  total_tokens = prompt_tokens + completion_tokens
+
+  # TODO: b/514760339 - Support completion_tokens_details with reasoning_tokens
+  # breakdown once C++ BenchmarkInfo natively exposes channel-specific counts:
+  # "completion_tokens_details": {"reasoning_tokens": reasoning_tokens}
+  return {
+      "prompt_tokens": prompt_tokens,
+      "completion_tokens": completion_tokens,
+      "total_tokens": total_tokens,
+  }
+
+
 class _OpenAIStreamFormatter(abc.ABC):
   """A formatter for OpenAI API compatible Server-Sent Events."""
 
@@ -157,40 +181,59 @@ class _OpenAIStreamFormatter(abc.ABC):
 class _OpenAIChatCompletionsFormatter(_OpenAIStreamFormatter):
   """A formatter for Server-Sent Events in the OpenAI Chat Completions API."""
 
-  def __init__(self, now_str: str, created_ts: int, model_id: str):
+  def __init__(
+      self,
+      now_str: str,
+      created_ts: int,
+      model_id: str,
+      *,
+      include_usage: bool = False,
+  ):
     super().__init__(now_str, created_ts, model_id)
     self._chunk_id = f"chatcmpl_{now_str}"
+    self._include_usage = include_usage
+
+  def _make_payload(
+      self,
+      choices: Sequence[Mapping[str, Any]],
+      usage: Mapping[str, Any] | None = None,
+  ) -> dict[str, Any]:
+    """Creates a standardized payload for chat completion chunks."""
+    payload: dict[str, Any] = {
+        "id": self._chunk_id,
+        "object": "chat.completion.chunk",
+        "created": self._created_ts,
+        "model": self._model_id,
+        "choices": list(choices),
+    }
+    if usage is not None:
+      payload["usage"] = dict(usage)
+    elif self._include_usage:
+      payload["usage"] = None
+    return payload
 
   def format_initial(self) -> bytes:
     """Formats the initial chunk."""
     return _sse_data(
-        _dump_json({
-            "id": self._chunk_id,
-            "object": "chat.completion.chunk",
-            "created": self._created_ts,
-            "model": self._model_id,
-            "choices": [{
+        _dump_json(
+            self._make_payload([{
                 "index": 0,
                 "delta": {"role": "assistant"},
                 "finish_reason": None,
-            }],
-        })
+            }])
+        )
     )
 
   def format_delta(self, text_output: str) -> bytes:
     """Formats a delta chunk with text content."""
     return _sse_data(
-        _dump_json({
-            "id": self._chunk_id,
-            "object": "chat.completion.chunk",
-            "created": self._created_ts,
-            "model": self._model_id,
-            "choices": [{
+        _dump_json(
+            self._make_payload([{
                 "index": 0,
                 "delta": {"content": text_output},
                 "finish_reason": None,
-            }],
-        })
+            }])
+        )
     )
 
   def format_tool_call_delta(
@@ -221,35 +264,31 @@ class _OpenAIChatCompletionsFormatter(_OpenAIStreamFormatter):
     ]
 
     return _sse_data(
-        _dump_json({
-            "id": self._chunk_id,
-            "object": "chat.completion.chunk",
-            "created": self._created_ts,
-            "model": self._model_id,
-            "choices": [{
+        _dump_json(
+            self._make_payload([{
                 "index": 0,
                 "delta": {"tool_calls": openai_tool_calls},
                 "finish_reason": None,
-            }],
-        })
+            }])
+        )
     )
 
   @override
   def format_complete(self, finish_reason: str = "stop") -> bytes:
     """Formats the final chunk indicating completion."""
     return _sse_data(
-        _dump_json({
-            "id": self._chunk_id,
-            "object": "chat.completion.chunk",
-            "created": self._created_ts,
-            "model": self._model_id,
-            "choices": [{
+        _dump_json(
+            self._make_payload([{
                 "index": 0,
                 "delta": {},
                 "finish_reason": finish_reason,
-            }],
-        })
+            }])
+        )
     )
+
+  def format_usage(self, usage: Mapping[str, Any]) -> bytes:
+    """Formats a chunk containing only token usage statistics."""
+    return _sse_data(_dump_json(self._make_payload([], usage=usage)))
 
 
 class _OpenAIV1ResponsesFormatter(_OpenAIStreamFormatter):
@@ -575,7 +614,9 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
       conv: litert_lm.Conversation,
       prompt: str | dict[str, Any],
       formatter: _OpenAIStreamFormatter,
+      *,
       max_completion_tokens: int | None = None,
+      include_usage: bool = False,
   ) -> None:
     """Streams server-sent events using the provided formatter.
 
@@ -584,6 +625,7 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
       prompt: The input prompt payload (string or dictionary).
       formatter: The protocol-specific stream formatter.
       max_completion_tokens: The maximum number of tokens to generate.
+      include_usage: Whether to emit a token usage chunk right before [DONE].
     """
     self._headers_sent = True
     self.send_response(200)
@@ -618,6 +660,10 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
       finish_reason = "tool_calls" if has_tool_calls else "stop"
       self.wfile.write(formatter.format_complete(finish_reason=finish_reason))
       self.wfile.flush()
+      if include_usage and hasattr(formatter, "format_usage"):
+        usage_dict = _compute_token_usage(conv)
+        self.wfile.write(formatter.format_usage(usage_dict))
+        self.wfile.flush()
       self.wfile.write(formatter.format_final())
       self.wfile.flush()
     except Exception as e:  # pylint: disable=broad-exception-caught
@@ -645,6 +691,7 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
       now_str: str,
       created_ts: int,
       max_completion_tokens: int | None = None,
+      stream_options: dict[str, Any] | None = None,
   ) -> None:
     """Generates responses for the OpenAI Chat Completions endpoint.
 
@@ -667,6 +714,7 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
       now_str: Timestamp string for unique identifier generation.
       created_ts: Epoch timestamp for creation metadata.
       max_completion_tokens: The maximum number of tokens to generate.
+      stream_options: Options for streaming, such as include_usage.
     """
     if not stream:
       response = conv.send_message(
@@ -711,6 +759,7 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
               },
               "finish_reason": "tool_calls" if openai_tool_calls else "stop",
           }],
+          "usage": _compute_token_usage(conv),
       }
       setattr(self, "_headers_sent", True)
       self.send_response(200)
@@ -721,9 +770,18 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
       )
       return
 
-    formatter = _OpenAIChatCompletionsFormatter(now_str, created_ts, model_id)
+    include_usage = bool(
+        stream_options and stream_options.get("include_usage", False)
+    )
+    formatter = _OpenAIChatCompletionsFormatter(
+        now_str, created_ts, model_id, include_usage=include_usage
+    )
     self._stream_response(
-        conv, prompt, formatter, max_completion_tokens=max_completion_tokens
+        conv,
+        prompt,
+        formatter,
+        max_completion_tokens=max_completion_tokens,
+        include_usage=include_usage,
     )
 
   def _handle_responses(
@@ -1009,6 +1067,10 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
         now_str = now.strftime("%Y%m%d%H%M%S%f")
         created_ts = int(now.timestamp())
 
+        stream_options = body.get("stream_options")
+        if not isinstance(stream_options, dict):
+          stream_options = {}
+
         self._handle_chat_completions(
             conv,
             prompt,
@@ -1017,6 +1079,7 @@ class OpenAIHandler(serve_util.CORSRequestHandler):
             now_str=now_str,
             created_ts=created_ts,
             max_completion_tokens=max_completion_tokens,
+            stream_options=stream_options,
         )
     except Exception as e:  # pylint: disable=broad-exception-caught
       self._handle_inference_error(e, model_id, prompt)
