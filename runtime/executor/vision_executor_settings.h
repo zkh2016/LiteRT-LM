@@ -66,6 +66,8 @@ class VisionExecutorSettings : public ExecutorSettingsBase {
   Backend GetAdapterBackend() const;
   // Setter for adapter_backend.
   absl::Status SetAdapterBackend(Backend backend);
+  bool IsMinicpmv() const { return is_minicpmv_; }
+  void SetIsMinicpmv(bool v) { is_minicpmv_ = v; }
 
   // Getter for scoped_adapter_cache_file.
   std::shared_ptr<litert::lm::ScopedFile> GetScopedAdapterCacheFile() const {
@@ -129,6 +131,7 @@ class VisionExecutorSettings : public ExecutorSettingsBase {
 
   // The cache file to use for the vision adapter model.
   std::shared_ptr<litert::lm::ScopedFile> scoped_adapter_cache_file_;
+  bool is_minicpmv_ = false;
 
   // The program cache file to use for the vision encoder model.
   std::shared_ptr<litert::lm::ScopedFile> scoped_encoder_program_cache_file_;

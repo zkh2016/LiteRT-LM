@@ -41,6 +41,7 @@ cc_library(
         ":gemma3_data_processor_config",
         ":gemma4_data_processor_config",
         ":generic_data_processor_config",
+        ":minicpmv_data_processor_config",
         ":qwen3_data_processor_config",
     ],
 )
@@ -207,6 +208,8 @@ cc_library(
         ":gemma4_data_processor_config",
         ":generic_data_processor",
         ":generic_data_processor_config",
+        ":minicpmv_data_processor",
+        ":minicpmv_data_processor_config",
         ":model_data_processor",
         ":qwen3_data_processor",
         ":qwen3_data_processor_config",
@@ -541,4 +544,36 @@ cc_library(
             "//runtime/components/logits_processor/constrained_decoding:gemma_model_constraint_provider_lib",
         ],
     }),
+)
+
+cc_library(
+    name = "minicpmv_data_processor_config",
+    hdrs = ["minicpmv_data_processor_config.h"],
+)
+
+cc_library(
+    name = "minicpmv_data_processor",
+    srcs = ["minicpmv_data_processor.cc"],
+    hdrs = ["minicpmv_data_processor.h"],
+    deps = [
+        ":minicpmv_data_processor_config",
+        ":model_data_processor",
+        ":multimodal_processor_helper",
+        "//runtime/components:prompt_template",
+        "//runtime/components/preprocessor:minicpmv_image_preprocess",
+        "//runtime/conversation:io_types",
+        "//runtime/engine:io_types",
+        "//runtime/util:convert_tensor_buffer",
+        "//runtime/util:litert_status_util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
+        "@litert//support/preprocessor:image_preprocessor",
+        "@nlohmann_json//:json",
+    ],
 )
