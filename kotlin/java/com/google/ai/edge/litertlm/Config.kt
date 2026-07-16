@@ -78,6 +78,39 @@ constructor(
 }
 
 /**
+ * Configuration for no repeat ngram banning.
+ *
+ * When [noRepeatNgramSize] is set greater than 0, any sequence of tokens (an ngram of that exact
+ * length) generated during decoding or present inside the window history can only occur at most
+ * once. If generating a candidate token would complete a repeating ngram, that candidate token's
+ * logit is set to -inf.
+ *
+ * @property noRepeatNgramSize The size of ngrams (consecutive token sequences) that are banned from
+ *   repeating within the generation history window. If set > 0, when generating the next token
+ *   would complete an already observed [noRepeatNgramSize] sequence, the logit of the candidate
+ *   token is set to -inf. If set <= 0, no repeat ngram banning is disabled. Negative values are
+ *   clamped to 0. Defaults to 0 when `null`.
+ * @property windowSize The maximum number of recent tokens in generation history to consider when
+ *   checking for repeating ngrams. Tokens generated prior to this window are forgotten. A value of
+ *   0 means tracking all infinite generation history. Must be >= 0; negative values are clamped
+ *   to 0. If [windowSize] is greater than 0 but less than [noRepeatNgramSize], it is automatically
+ *   clamped to [noRepeatNgramSize] during execution so that the ngrams can fit and be tracked.
+ *   Defaults to 0 when `null`.
+ */
+data class NoRepeatNgramConfig
+@JvmOverloads
+constructor(val noRepeatNgramSize: Int? = null, val windowSize: Int? = null) {
+  init {
+    require(noRepeatNgramSize == null || noRepeatNgramSize >= 0) {
+      "noRepeatNgramSize should be >= 0, but got $noRepeatNgramSize."
+    }
+    require(windowSize == null || windowSize >= 0) {
+      "windowSize should be >= 0, but got $windowSize."
+    }
+  }
+}
+
+/**
  * Configuration for thinking/reasoning generation.
  *
  * @property enableThinking Whether thinking/reasoning generation is enabled.

@@ -101,6 +101,7 @@ class Conversation(
     message: Message,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ): Message {
@@ -118,6 +119,7 @@ class Conversation(
           extraContextJsonString,
           visualTokenBudget,
           repetitionPenaltyConfig,
+          noRepeatNgramConfig,
           maxOutputToken ?: -1,
           if (i == 0) thinkingConfig else null,
         )
@@ -162,6 +164,7 @@ class Conversation(
     contents: Contents,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ): Message {
@@ -169,6 +172,7 @@ class Conversation(
       Message.user(contents),
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -198,6 +202,7 @@ class Conversation(
     text: String,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ): Message =
@@ -205,6 +210,7 @@ class Conversation(
       Contents.of(text),
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -221,6 +227,7 @@ class Conversation(
    * @param callback The callback to receive the streaming responses.
    * @param extraContext Optional context used for prompt template rendering.
    * @param repetitionPenaltyConfig Optional configuration for repetition penalty.
+   * @param noRepeatNgramConfig Optional configuration for no repeat ngram.
    * @param maxOutputToken Optional override for the maximum number of output tokens per decode
    *   step.
    * @param thinkingConfig Optional configuration for thinking/reasoning generation.
@@ -233,6 +240,7 @@ class Conversation(
     callback: MessageCallback,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ) {
@@ -241,7 +249,8 @@ class Conversation(
     val extraContextJsonString = extraContext.toJsonObject().toString()
     val visualTokenBudget = @OptIn(ExperimentalApi::class) ExperimentalFlags.visualTokenBudget
 
-    val jniCallback = JniMessageCallbackImpl(callback, repetitionPenaltyConfig, maxOutputToken)
+    val jniCallback =
+      JniMessageCallbackImpl(callback, repetitionPenaltyConfig, noRepeatNgramConfig, maxOutputToken)
     LiteRtLmJni.nativeSendMessageAsync(
       handle,
       message.toJson().toString(),
@@ -249,6 +258,7 @@ class Conversation(
       jniCallback,
       visualTokenBudget,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken ?: -1,
       thinkingConfig,
     )
@@ -278,6 +288,7 @@ class Conversation(
     callback: MessageCallback,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ) =
@@ -286,6 +297,7 @@ class Conversation(
       callback,
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -314,6 +326,7 @@ class Conversation(
     callback: MessageCallback,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ) =
@@ -322,6 +335,7 @@ class Conversation(
       callback,
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -349,6 +363,7 @@ class Conversation(
     message: Message,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ): Flow<Message> = callbackFlow {
@@ -369,6 +384,7 @@ class Conversation(
       },
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -398,6 +414,7 @@ class Conversation(
     contents: Contents,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ): Flow<Message> =
@@ -405,6 +422,7 @@ class Conversation(
       Message.user(contents),
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -432,6 +450,7 @@ class Conversation(
     text: String,
     extraContext: Map<String, Any> = emptyMap(),
     repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     maxOutputToken: Int? = null,
     thinkingConfig: ThinkingConfig? = null,
   ): Flow<Message> =
@@ -439,6 +458,7 @@ class Conversation(
       Contents.of(text),
       extraContext,
       repetitionPenaltyConfig,
+      noRepeatNgramConfig,
       maxOutputToken,
       thinkingConfig,
     )
@@ -474,6 +494,7 @@ class Conversation(
   private inner class JniMessageCallbackImpl(
     private val callback: MessageCallback,
     private val repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+    private val noRepeatNgramConfig: NoRepeatNgramConfig? = null,
     private val maxOutputToken: Int? = null,
   ) : LiteRtLmJni.JniMessageCallback {
 
@@ -515,6 +536,7 @@ class Conversation(
           this@JniMessageCallbackImpl,
           @OptIn(ExperimentalApi::class) ExperimentalFlags.visualTokenBudget,
           repetitionPenaltyConfig,
+          noRepeatNgramConfig,
           maxOutputToken ?: -1,
           null,
         )

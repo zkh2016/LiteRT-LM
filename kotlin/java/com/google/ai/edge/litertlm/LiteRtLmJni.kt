@@ -248,6 +248,7 @@ internal object LiteRtLmJni {
    * @param visualTokenBudget The visual token budget. Only supported by Gemma4 currently. Null for
    *   default.
    * @param repetitionPenaltyConfig Configuration for repetition penalty.
+   * @param noRepeatNgramConfig Configuration for no repeat ngram.
    * @param maxOutputToken The maximum number of output tokens. When non-positive, use the default.
    * @param thinkingConfig Configuration for thinking/reasoning generation.
    */
@@ -258,6 +259,7 @@ internal object LiteRtLmJni {
     callback: JniMessageCallback,
     visualTokenBudget: Int?,
     repetitionPenaltyConfig: RepetitionPenaltyConfig?,
+    noRepeatNgramConfig: NoRepeatNgramConfig?,
     maxOutputToken: Int,
     thinkingConfig: ThinkingConfig?,
   )
@@ -272,6 +274,7 @@ internal object LiteRtLmJni {
    * @param visualTokenBudget The visual token budget. Only supported by Gemma4 currently. Null for
    *   default.
    * @param repetitionPenaltyConfig Configuration for repetition penalty.
+   * @param noRepeatNgramConfig Configuration for no repeat ngram.
    * @param maxOutputToken The maximum number of output tokens. When non-positive, use the default.
    * @param thinkingConfig Configuration for thinking/reasoning generation.
    * @return The response message in JSON string format.
@@ -282,6 +285,7 @@ internal object LiteRtLmJni {
     extraContextJsonString: String,
     visualTokenBudget: Int?,
     repetitionPenaltyConfig: RepetitionPenaltyConfig?,
+    noRepeatNgramConfig: NoRepeatNgramConfig?,
     maxOutputToken: Int,
     thinkingConfig: ThinkingConfig?,
   ): String
