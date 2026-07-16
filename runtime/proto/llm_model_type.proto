@@ -31,6 +31,7 @@ message LlmModelType {
     Qwen2p5 qwen2p5 = 7;
     Gemma4 gemma4 = 8;
     FastVlm fast_vlm = 9;
+    Minicpmv minicpmv = 10;
   }
 }
 
@@ -310,4 +311,12 @@ message FastVlm {
   int32 image_tensor_width = 4;
 
   reserved 1, 2;
+}
+
+// MiniCPM-V-4 multimodal (SigLIP vision encoder + Resampler + Llama LLM).
+message Minicpmv {
+  // The square image side the preprocessor resizes to (default 980 = 70*14).
+  int32 image_size = 1;
+  // Number of soft-token embeddings the resampler emits per image (default 64).
+  int32 image_feature_size = 2;
 }

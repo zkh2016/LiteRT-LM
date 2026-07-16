@@ -48,6 +48,7 @@
 #include "runtime/executor/llm_executor_settings.h"
 #include "runtime/executor/vision_executor.h"
 #include "runtime/executor/vision_executor_settings.h"
+#include "runtime/executor/minicpmv_vision_executor.h"
 #include "runtime/executor/vision_litert_compiled_model_executor.h"
 #include "runtime/framework/resource_management/context_handler/context_handler.h"
 #include "runtime/framework/resource_management/utils/movable_mutex_lock.h"
@@ -810,9 +811,15 @@ absl::Status ResourceManager::TryLoadingVisionExecutor() {
   }
 
   ABSL_RETURN_IF_ERROR(MaybeCreateLitertEnv());
-  ABSL_ASSIGN_OR_RETURN(vision_executor_,
-                        VisionLiteRtCompiledModelExecutor::Create(
-                            *vision_executor_settings_, *litert_env_));
+  if (vision_executor_settings_->IsMinicpmv()) {
+    ABSL_ASSIGN_OR_RETURN(vision_executor_,
+                          MinicpmvVisionExecutor::Create(
+                              *vision_executor_settings_, *litert_env_));
+  } else {
+    ABSL_ASSIGN_OR_RETURN(vision_executor_,
+                          VisionLiteRtCompiledModelExecutor::Create(
+                              *vision_executor_settings_, *litert_env_));
+  }
   return absl::OkStatus();
 }
 

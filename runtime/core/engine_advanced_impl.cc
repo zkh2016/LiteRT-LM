@@ -309,6 +309,10 @@ absl::StatusOr<std::unique_ptr<Engine>> EngineAdvancedImpl::Create(
   if (engine_settings.GetVisionExecutorSettings().has_value()) {
     vision_executor_settings_ptr = std::make_unique<VisionExecutorSettings>(
         std::move(engine_settings.GetVisionExecutorSettings().value()));
+    if (engine_settings.GetLlmMetadata().has_value() &&
+        engine_settings.GetLlmMetadata()->llm_model_type().has_minicpmv()) {
+      vision_executor_settings_ptr->SetIsMinicpmv(true);
+    }
     if (vision_executor_settings_ptr->GetAdapterBackend() != Backend::CPU) {
       ABSL_LOG(WARNING) << "Vision adapter backend is not CPU, which may cause "
                            "precision loss.";

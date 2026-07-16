@@ -60,3 +60,33 @@ alias(
     name = "image_preprocessor_utils",
     actual = "@litert//support/preprocessor:image_preprocessor_utils",
 )
+
+# MiniCPM-V vision preprocessing (stdlib-only PIL-faithful resize + normalize)
+# and the resampler 2D sin-cos position embedding.
+
+cc_library(
+    name = "minicpmv_pos_embed",
+    srcs = ["minicpmv_pos_embed.cc"],
+    hdrs = ["minicpmv_pos_embed.h"],
+    deps = ["@com_google_absl//absl/base:core_headers"],
+)
+
+cc_library(
+    name = "pil_resize",
+    srcs = ["pil_resize.cc"],
+    hdrs = ["pil_resize.h"],
+    deps = ["@com_google_absl//absl/base:core_headers"],
+)
+
+cc_library(
+    name = "minicpmv_image_preprocess",
+    srcs = ["minicpmv_image_preprocess.cc"],
+    hdrs = ["minicpmv_image_preprocess.h"],
+    deps = [
+        ":pil_resize",
+        "//third_party/minicpmv_vendored:stb_image",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
