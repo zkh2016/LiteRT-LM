@@ -276,8 +276,12 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionEncoder::Initialize() {
 
   LITERT_ASSIGN_OR_RETURN(compiled_model_,
                           CompiledModel::Create(env_, model_.Get(), options));
-  if (!vision_executor_properties_.patch_num_shrink_factor.has_value()) {
-    // Only create input buffer at initialization for non-VIT models.
+  if (model_.GetNumSignatures() == 1) {
+    // A single signature encoder(non-ViT model + single input LFM2-VL)
+    // uses a single buffer encode path, so buffers must be created in advance,
+    // but multi-signature(ViT) encoders create buffers for each signature
+    // in map-based encode at that time, so signature 0 buffers should not
+    // be created in advance.
     LITERT_ASSIGN_OR_RETURN(input_buffers_,
                             compiled_model_.CreateInputBuffers(0));
     LITERT_ASSIGN_OR_RETURN(output_buffers_,
