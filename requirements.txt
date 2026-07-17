@@ -63,7 +63,7 @@ pytz==2026.1.post1
 regex==2026.4.4
 requests==2.33.1
 rouge-score==0.1.2
-rpds-py==0.18.1
+rpds-py==2026.6.3
 sacrebleu==2.6.0
 scikit-learn==1.8.0
 scipy==1.17.1

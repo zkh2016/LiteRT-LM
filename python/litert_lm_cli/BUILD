@@ -312,5 +312,6 @@ genrule(
         echo 'prompt_toolkit' >> $@
         echo 'typing-extensions' >> $@
         echo 'questionary' >> $@
+        echo 'jsonschema' >> $@
     """,
 )
