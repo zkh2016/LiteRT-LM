@@ -2133,13 +2133,14 @@ absl::Status LlmLiteRtNpuCompiledModelExecutor::PrefillInternal(
   // Even if the actual input `ids` is smaller, the hardware cache update
   // will attempt to write `kPrefillSize` tokens, which can cause out-of-bounds
   // writes if we are close to the end of the cache.
-  if (current_step_ + kPrefillSize > executor_settings_.GetMaxNumTokens()) {
+  const int prefill_size = prefill_signatures_.size;
+  if (current_step_ + prefill_size > executor_settings_.GetMaxNumTokens()) {
     ABSL_LOG(ERROR) << "Prefill length exceeds capacity. current_step_="
-                    << current_step_ << ", kPrefillSize=" << prefill_signatures_.size
+                    << current_step_ << ", kPrefillSize=" << prefill_size
                     << ", max_sequence_length_="
                     << executor_settings_.GetMaxNumTokens();
     return absl::InvalidArgumentError(
-        absl::StrCat("Prefill length (", kPrefillSize, ") plus current step (",
+        absl::StrCat("Prefill length (", prefill_size, ") plus current step (",
                      current_step_, ") exceeds max sequence length (",
                      executor_settings_.GetMaxNumTokens(), ")."));
   }
@@ -3564,8 +3565,10 @@ LlmLiteRtNpuCompiledModelExecutor::DetermineMaxSequenceLength(
     // and instead we need to find the true global KV cache.
     // Once the "Executor metadata" design is implemented the information can
     // instead be taken from there.
-    LITERT_ASSIGN_OR_RETURN(SimpleSignature prefill_signature,
-                            llm_model.FindSignature(prefill_signatures.prefill));
+    LITERT_ASSIGN_OR_RETURN(const int prefill_size, DetectPrefillSize(llm_model));
+    LITERT_ASSIGN_OR_RETURN(
+         SimpleSignature prefill_signature,
+         llm_model.FindSignature(PrefillSig(kPrefillSignatureBase, prefill_size)));
     for (auto input_name : prefill_signature.InputNames()) {
       if (absl::StartsWith(input_name, kv_cache_k_root_name) ||
           absl::StartsWith(input_name, kv_cache_v_root_name) ||
