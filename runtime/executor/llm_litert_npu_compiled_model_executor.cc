@@ -2135,7 +2135,7 @@ absl::Status LlmLiteRtNpuCompiledModelExecutor::PrefillInternal(
   // writes if we are close to the end of the cache.
   if (current_step_ + kPrefillSize > executor_settings_.GetMaxNumTokens()) {
     ABSL_LOG(ERROR) << "Prefill length exceeds capacity. current_step_="
-                    << current_step_ << ", kPrefillSize=" << kPrefillSize
+                    << current_step_ << ", kPrefillSize=" << prefill_signatures_.size
                     << ", max_sequence_length_="
                     << executor_settings_.GetMaxNumTokens();
     return absl::InvalidArgumentError(
@@ -3565,7 +3565,7 @@ LlmLiteRtNpuCompiledModelExecutor::DetermineMaxSequenceLength(
     // Once the "Executor metadata" design is implemented the information can
     // instead be taken from there.
     LITERT_ASSIGN_OR_RETURN(SimpleSignature prefill_signature,
-                            llm_model.FindSignature(kPrefillSignature));
+                            llm_model.FindSignature(prefill_signatures.prefill));
     for (auto input_name : prefill_signature.InputNames()) {
       if (absl::StartsWith(input_name, kv_cache_k_root_name) ||
           absl::StartsWith(input_name, kv_cache_v_root_name) ||
