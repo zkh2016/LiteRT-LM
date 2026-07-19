@@ -23,6 +23,7 @@
 #include "runtime/conversation/model_data_processor/gemma4_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/generic_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/qwen3_data_processor_config.h"
+#include "runtime/conversation/model_data_processor/lfm2_data_processor_config.h"
 
 namespace litert::lm {
 
@@ -33,7 +34,7 @@ using DataProcessorConfig =
     std::variant<Gemma3DataProcessorConfig, GenericDataProcessorConfig,
                  Qwen3DataProcessorConfig, FunctionGemmaDataProcessorConfig,
                  Gemma4DataProcessorConfig,
-                 FastVlmDataProcessorConfig
+                 FastVlmDataProcessorConfig, Lfm2DataProcessorConfig
                  >;
 
 // DataProcessorArguments is a registry of all the model-specific data processor
@@ -44,7 +45,7 @@ using DataProcessorArguments =
                  Gemma3DataProcessorArguments, Qwen3DataProcessorArguments,
                  FunctionGemmaDataProcessorArguments,
                  Gemma4DataProcessorArguments,
-                 FastVlmDataProcessorArguments
+                 FastVlmDataProcessorArguments, Lfm2DataProcessorArguments
                  >;
 
 }  // namespace litert::lm
