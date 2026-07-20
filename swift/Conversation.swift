@@ -16,6 +16,17 @@ import Foundation
 import OSLog
 import CLiteRTLM
 
+extension ResponseFormat.FormatType {
+  var cConstraintType: LiteRtLmConstraintType {
+    switch self {
+    case .regex:
+      return kLiteRtLmConstraintTypeRegex
+    case .jsonObject:
+      return kLiteRtLmConstraintTypeJsonSchema
+    }
+  }
+}
+
 typealias CConversationHandle = OpaquePointer
 
 private let logger = Logger(
@@ -53,6 +64,7 @@ public class Conversation {
   private let toolManager: ToolManager
   private let automaticToolCalling: Bool
   private let engine: Engine
+  private let enableResponseFormat: Bool
 
   /// Whether the conversation is alive and ready to be used.
   public var isAlive: Bool {
@@ -61,12 +73,13 @@ public class Conversation {
 
   init(
     handle: CConversationHandle, toolManager: ToolManager, automaticToolCalling: Bool = true,
-    engine: Engine
+    engine: Engine, enableResponseFormat: Bool = false
   ) {
     self.handle = handle
     self.toolManager = toolManager
     self.automaticToolCalling = automaticToolCalling
     self.engine = engine
+    self.enableResponseFormat = enableResponseFormat
   }
 
   deinit {
@@ -74,6 +87,18 @@ public class Conversation {
       self.handle = nil
       litert_lm_conversation_delete(handle)
     }
+  }
+
+  private func shouldApplyResponseFormat(
+    _ responseFormat: ResponseFormat?,
+    forMessageDict messageDict: [String: Any]
+  ) -> Bool {
+    guard responseFormat != nil else { return false }
+    let isToolResponse = (messageDict["role"] as? String) == "tool"
+    if automaticToolCalling && toolManager.toolsJsonDescription != "[]" && !isToolResponse {
+      return false
+    }
+    return true
   }
 
   /// Sends a message to the model and returns the response. This is a synchronous call.
@@ -84,6 +109,7 @@ public class Conversation {
   /// - Parameter noRepeatNgramConfig: Optional configuration for no repeat ngram penalty.
   /// - Parameter maxOutputTokens: Optional maximum number of output tokens.
   /// - Parameter thinkingConfig: Optional configuration for thinking/reasoning generation.
+  /// - Parameter responseFormat: Optional response format for constrained decoding.
   /// - Returns: The model's response message.
   /// - Throws: A `LiteRTLMError` if sending the message fails or the model
   ///   returns an invalid response.
@@ -94,9 +120,14 @@ public class Conversation {
     noRepeatNgramConfig: NoRepeatNgramConfig? = nil,
     suppressTokensConfig: SuppressTokensConfig? = nil,
     maxOutputTokens: Int? = nil,
-    thinkingConfig: ThinkingConfig? = nil
+    thinkingConfig: ThinkingConfig? = nil,
+    responseFormat: ResponseFormat? = nil
   ) async throws -> Message {
     let handle = try checkIsAlive()
+
+    if responseFormat != nil && !enableResponseFormat {
+      throw LiteRTLMError.conversation(.responseFormatNotEnabled)
+    }
 
     var currentMessageJson: [String: Any] = message.toJson
 
@@ -109,7 +140,8 @@ public class Conversation {
         noRepeatNgramConfig: noRepeatNgramConfig,
         suppressTokensConfig: suppressTokensConfig,
         maxOutputTokens: maxOutputTokens,
-        thinkingConfig: i == 0 ? thinkingConfig : nil
+        thinkingConfig: i == 0 ? thinkingConfig : nil,
+        responseFormat: responseFormat
       )
 
       guard let toolCalls = responseJson["tool_calls"] as? [[String: Any]] else {
@@ -136,7 +168,8 @@ public class Conversation {
     noRepeatNgramConfig: NoRepeatNgramConfig? = nil,
     suppressTokensConfig: SuppressTokensConfig? = nil,
     maxOutputTokens: Int? = nil,
-    thinkingConfig: ThinkingConfig? = nil
+    thinkingConfig: ThinkingConfig? = nil,
+    responseFormat: ResponseFormat? = nil
   ) throws
     -> (responseJson: [String: Any], responseString: String)
   {
@@ -233,6 +266,13 @@ public class Conversation {
       litert_lm_conversation_optional_args_set_thinking_config(optionalArgs, cThinkingConfig)
     }
 
+    if let responseFormat = responseFormat,
+      shouldApplyResponseFormat(responseFormat, forMessageDict: messageJson)
+    {
+      litert_lm_conversation_optional_args_set_constraint(
+        optionalArgs, responseFormat.type.cConstraintType, responseFormat.schemaOrPattern)
+    }
+
     guard
       let responsePtr = litert_lm_conversation_send_message(
         handle, messageString, extraContextString, optionalArgs)
@@ -302,6 +342,7 @@ public class Conversation {
   /// - Parameter repetitionPenaltyConfig: Optional configuration for repetition penalty.
   /// - Parameter maxOutputTokens: Optional maximum number of output tokens.
   /// - Parameter thinkingConfig: Optional configuration for thinking/reasoning generation.
+  /// - Parameter responseFormat: Optional response format for constrained decoding.
   /// - Returns: An async throwing stream of `Message` chunks.
   public func sendMessageStream(
     _ message: Message,
@@ -310,10 +351,14 @@ public class Conversation {
     noRepeatNgramConfig: NoRepeatNgramConfig? = nil,
     suppressTokensConfig: SuppressTokensConfig? = nil,
     maxOutputTokens: Int? = nil,
-    thinkingConfig: ThinkingConfig? = nil
+    thinkingConfig: ThinkingConfig? = nil,
+    responseFormat: ResponseFormat? = nil
   ) -> AsyncThrowingStream<Message, Error> {
     return AsyncThrowingStream { continuation in
       do {
+        if responseFormat != nil && !enableResponseFormat {
+          throw LiteRTLMError.conversation(.responseFormatNotEnabled)
+        }
         let handle = try self.checkIsAlive()
         let messageJson: [String: Any] = message.toJson
         let context = StreamContext(
@@ -322,7 +367,8 @@ public class Conversation {
           repetitionPenaltyConfig: repetitionPenaltyConfig,
           noRepeatNgramConfig: noRepeatNgramConfig,
           suppressTokensConfig: suppressTokensConfig,
-          maxOutputTokens: maxOutputTokens
+          maxOutputTokens: maxOutputTokens,
+          responseFormat: responseFormat
         )
 
         try self.sendToStream(
@@ -334,6 +380,7 @@ public class Conversation {
           suppressTokensConfig: suppressTokensConfig,
           maxOutputTokens: maxOutputTokens,
           thinkingConfig: thinkingConfig,
+          responseFormat: responseFormat,
           context: context
         )
       } catch {
@@ -367,6 +414,7 @@ public class Conversation {
     suppressTokensConfig: SuppressTokensConfig? = nil,
     maxOutputTokens: Int? = nil,
     thinkingConfig: ThinkingConfig? = nil,
+    responseFormat: ResponseFormat? = nil,
     context: StreamContext
   ) throws {
     let messageData = try JSONSerialization.data(withJSONObject: messageJson)
@@ -461,6 +509,13 @@ public class Conversation {
       litert_lm_thinking_config_set_thinking_token_budget(
         cThinkingConfig, Int32(thinkingConfig.thinkingTokenBudget))
       litert_lm_conversation_optional_args_set_thinking_config(optionalArgs, cThinkingConfig)
+    }
+
+    if let responseFormat = responseFormat,
+      shouldApplyResponseFormat(responseFormat, forMessageDict: messageJson)
+    {
+      litert_lm_conversation_optional_args_set_constraint(
+        optionalArgs, responseFormat.type.cConstraintType, responseFormat.schemaOrPattern)
     }
 
     let contextPtr = Unmanaged.passRetained(context).toOpaque()
@@ -678,6 +733,7 @@ public class Conversation {
     let noRepeatNgramConfig: NoRepeatNgramConfig?
     let suppressTokensConfig: SuppressTokensConfig?
     let maxOutputTokens: Int?
+    let responseFormat: ResponseFormat?
 
     init(
       continuation: AsyncThrowingStream<Message, Error>.Continuation,
@@ -685,7 +741,8 @@ public class Conversation {
       repetitionPenaltyConfig: RepetitionPenaltyConfig? = nil,
       noRepeatNgramConfig: NoRepeatNgramConfig? = nil,
       suppressTokensConfig: SuppressTokensConfig? = nil,
-      maxOutputTokens: Int? = nil
+      maxOutputTokens: Int? = nil,
+      responseFormat: ResponseFormat? = nil
     ) {
       self.continuation = continuation
       self.conversation = conversation
@@ -693,6 +750,7 @@ public class Conversation {
       self.noRepeatNgramConfig = noRepeatNgramConfig
       self.suppressTokensConfig = suppressTokensConfig
       self.maxOutputTokens = maxOutputTokens
+      self.responseFormat = responseFormat
     }
   }
 }
@@ -767,6 +825,7 @@ private func streamCallback(
             noRepeatNgramConfig: context.noRepeatNgramConfig,
             suppressTokensConfig: context.suppressTokensConfig,
             maxOutputTokens: context.maxOutputTokens,
+            responseFormat: context.responseFormat,
             context: context
           )
         } catch {
