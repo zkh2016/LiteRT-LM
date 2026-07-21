@@ -20,7 +20,6 @@
 #include <string>
 #include <vector>
 
-#include "absl/log/absl_log.h"        // from @com_google_absl
 #include "absl/memory/memory.h"       // from @com_google_absl
 #include "absl/status/status.h"       // from @com_google_absl
 #include "absl/status/statusor.h"     // from @com_google_absl
@@ -36,89 +35,6 @@ namespace litert::lm {
 namespace {
 
 using nlohmann::ordered_json;
-
-// An ImagePreprocessor that runs MiniCPM-V's exact preprocessing (fixed 980,
-// (x/255-0.5)/0.5, CHW) and returns an InputImage carrying a [1,3,980,980]
-// float TensorBuffer, ready for MinicpmvVisionExecutor::Encode.
-class MinicpmvImagePreprocessor : public ImagePreprocessor {
- public:
-  explicit MinicpmvImagePreprocessor(int image_size)
-      : image_size_(image_size) {}
-
-  absl::StatusOr<InputImage> Preprocess(
-      const InputImage& input_image,
-      const ImagePreprocessParameter& parameter) override {
-    // Already-preprocessed tensors pass through (base-class behavior).
-    if (input_image.IsTensorBuffer()) {
-      return ImagePreprocessor::Preprocess(input_image, parameter);
-    }
-    ASSIGN_OR_RETURN(absl::string_view bytes, input_image.GetRawImageBytes());
-
-    // Official slicing: thumbnail + sub-images. Each slice -> reshape_by_patch
-    // strip [3,14,kMaxL*14] + position_ids [kMaxL] + valid patch count.
-    constexpr int kMaxL = 1216;
-    constexpr int kModelDim = 2560;
-    MinicpmvSliceConfig scfg;
-    ASSIGN_OR_RETURN(MinicpmvSliced sliced,
-                     PreprocessImageSliced(std::string(bytes), scfg));
-    const int N = static_cast<int>(sliced.slices.size());
-
-    const size_t strip_elems = static_cast<size_t>(3) * 14 * kMaxL * 14;
-    std::vector<float> strips(static_cast<size_t>(N) * strip_elems, 0.0f);
-    std::vector<int32_t> posids(static_cast<size_t>(N) * kMaxL, 0);
-    std::vector<int32_t> nps(N, 0);
-    // pos_embed [N, kMaxL, kModelDim], per-slice sub-grid padded to kMaxL.
-    std::vector<float> pes(static_cast<size_t>(N) * kMaxL * kModelDim, 0.0f);
-    for (int i = 0; i < N; ++i) {
-      const auto& sl = sliced.slices[i];
-      // strip is [3,14,num_patches*14]; copy into the [3,14,kMaxL*14] slot,
-      // laid out row-major so we copy each of the 3*14 rows into the padded row.
-      const int strip_w = sl.num_patches * 14;
-      const int padded_w = kMaxL * 14;
-      for (int r = 0; r < 3 * 14; ++r) {
-        std::copy(sl.strip.data() + static_cast<size_t>(r) * strip_w,
-                  sl.strip.data() + static_cast<size_t>(r) * strip_w + strip_w,
-                  strips.data() + static_cast<size_t>(i) * strip_elems +
-                      static_cast<size_t>(r) * padded_w);
-      }
-      for (int k = 0; k < sl.num_patches && k < kMaxL; ++k)
-        posids[static_cast<size_t>(i) * kMaxL + k] =
-            static_cast<int32_t>(sl.position_ids[k]);
-      // pos_embed: copy sl.pos_embed [num_patches, kModelDim] into [kMaxL, kModelDim] slot.
-      std::copy(sl.pos_embed.data(),
-                sl.pos_embed.data() +
-                    static_cast<size_t>(sl.num_patches) * kModelDim,
-                pes.data() + static_cast<size_t>(i) * kMaxL * kModelDim);
-      nps[i] = sl.num_patches;
-    }
-
-    LITERT_ASSIGN_OR_RETURN(
-        auto strips_t,
-        CopyToTensorBuffer<float>(absl::MakeConstSpan(strips),
-                                  ::litert::Dimensions({N, 3, 14, kMaxL * 14})));
-    LITERT_ASSIGN_OR_RETURN(
-        auto pos_t,
-        CopyToTensorBuffer<int32_t>(absl::MakeConstSpan(posids),
-                                    ::litert::Dimensions({N, kMaxL})));
-    LITERT_ASSIGN_OR_RETURN(
-        auto np_t, CopyToTensorBuffer<int32_t>(absl::MakeConstSpan(nps),
-                                               ::litert::Dimensions({N})));
-    LITERT_ASSIGN_OR_RETURN(
-        auto pe_t, CopyToTensorBuffer<float>(
-                       absl::MakeConstSpan(pes),
-                       ::litert::Dimensions({N, kMaxL, kModelDim})));
-    absl::flat_hash_map<std::string, ::litert::TensorBuffer> m;
-    m.emplace("strips", std::move(strips_t));
-    m.emplace("position_ids", std::move(pos_t));
-    m.emplace("num_patches", std::move(np_t));
-    m.emplace("pos_embed", std::move(pe_t));
-    return InputImage(std::move(m));
-  }
-
- private:
-  int image_size_;
-};
-
 
 // Builds a single-slice TensorBufferMap InputImage from one preprocessed slice.
 // The executor's Encode(map) treats N=1 -> 64 vision tokens.
@@ -169,9 +85,7 @@ absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
 absl::StatusOr<std::unique_ptr<MinicpmvDataProcessor>>
 MinicpmvDataProcessor::Create(MinicpmvDataProcessorConfig config,
                               const PromptTemplateCapabilities& capabilities) {
-  return absl::WrapUnique(new MinicpmvDataProcessor(
-      config, capabilities,
-      std::make_unique<MinicpmvImagePreprocessor>(config.image_size)));
+  return absl::WrapUnique(new MinicpmvDataProcessor(config, capabilities));
 }
 
 absl::StatusOr<ordered_json> MinicpmvDataProcessor::MessageToTemplateInput(

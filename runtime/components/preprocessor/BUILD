@@ -85,9 +85,12 @@ cc_library(
     deps = [
         ":minicpmv_pos_embed",
         ":pil_resize",
-        "//third_party/minicpmv_vendored:stb_image",
+        # stb_image.h declarations; the STB_IMAGE_IMPLEMENTATION symbols come
+        # from :stb_image_preprocessor (the single TU that compiles them).
+        ":stb_image_preprocessor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
+        "@stb//:stb_image",
     ],
 )

@@ -23,30 +23,6 @@
 
 namespace litert::lm {
 
-// MiniCPM-V image preprocessing (baseline: fixed 980x980, no slicing).
-//
-// Pipeline (matches the HF MiniCPMVImageProcessor for a single un-sliced
-// image, and is bit-faithful to the reference PillowResize + normalize):
-//   decode(stb) -> PillowResize BICUBIC to 980x980 -> (x/255 - 0.5)/0.5
-//                -> HWC to CHW  => float [1, 3, 980, 980]
-//
-// norm_mean / norm_std default to 0.5 (from preprocessor_config.json), which
-// maps [0,255] to [-1, 1]. image_size defaults to 980 (= 70 patches * 14).
-struct MinicpmvPreprocessConfig {
-  int image_size = 980;
-  float norm_mean[3] = {0.5f, 0.5f, 0.5f};
-  float norm_std[3] = {0.5f, 0.5f, 0.5f};
-};
-
-// Decodes raw image bytes (PNG/JPEG/... via stb_image) and returns a
-// CHW float buffer of shape [1, 3, image_size, image_size].
-absl::StatusOr<std::vector<float>> PreprocessImageFixed(
-    const std::string& image_bytes, const MinicpmvPreprocessConfig& config = {});
-
-// Same but reads the image from a file path.
-absl::StatusOr<std::vector<float>> PreprocessImageFileFixed(
-    const std::string& image_path, const MinicpmvPreprocessConfig& config = {});
-
 // ---- Multi-slice (official) preprocessing ----
 //
 // MiniCPM-V official slicing: an image is split into a thumbnail (source

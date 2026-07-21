@@ -19,8 +19,6 @@
 #include <cmath>
 #include <cstdint>
 #include <utility>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -29,59 +27,16 @@
 #include "absl/strings/str_format.h"  // from @com_google_absl
 #include "runtime/components/preprocessor/pil_resize.h"
 
-#include "stb_image.h"
+// stb_image is a single-header library whose implementation
+// (STB_IMAGE_IMPLEMENTATION) must be compiled in exactly one translation unit
+// per binary. That TU is the stock support/preprocessor/stb_image_preprocessor,
+// which is always linked into litert_lm_main (other data processors depend on
+// it). We therefore include only the declarations here and take an explicit
+// build dep on :stb_image_preprocessor so the stbi_* symbols are guaranteed to
+// be present, rather than relying on an implicit link-time coincidence.
+#include "stb_image.h"  // from @stb
 
 namespace litert::lm {
-
-absl::StatusOr<std::vector<float>> PreprocessImageFixed(
-    const std::string& image_bytes, const MinicpmvPreprocessConfig& config) {
-  // Decode via stb_image, forcing 3 channels (RGB), HWC uint8.
-  int w = 0, h = 0, c = 0;
-  unsigned char* pixels = stbi_load_from_memory(
-      reinterpret_cast<const unsigned char*>(image_bytes.data()),
-      static_cast<int>(image_bytes.size()), &w, &h, &c, /*desired_channels=*/3);
-  if (pixels == nullptr) {
-    return absl::InvalidArgumentError(
-        absl::StrFormat("stb_image failed to decode image: %s",
-                        stbi_failure_reason() ? stbi_failure_reason() : "?"));
-  }
-
-  // PIL-faithful bicubic resize to image_size x image_size (HWC uint8).
-  const int S = config.image_size;
-  std::vector<uint8_t> resized =
-      PilResizeBicubicRgb(pixels, w, h, S, S);
-  stbi_image_free(pixels);
-
-  // Normalize (x/255 - mean)/std, written directly in CHW order.
-  // Output layout: [1, 3, S, S] => index ch*S*S + y*S + x.
-  std::vector<float> out(static_cast<size_t>(3) * S * S);
-  for (int y = 0; y < S; ++y) {
-    for (int x = 0; x < S; ++x) {
-      const uint8_t* px = &resized[(static_cast<size_t>(y) * S + x) * 3];
-      for (int ch = 0; ch < 3; ++ch) {
-        const float v =
-            (static_cast<float>(px[ch]) / 255.0f - config.norm_mean[ch]) /
-            config.norm_std[ch];
-        out[static_cast<size_t>(ch) * S * S + static_cast<size_t>(y) * S + x] =
-            v;
-      }
-    }
-  }
-  return out;
-}
-
-absl::StatusOr<std::vector<float>> PreprocessImageFileFixed(
-    const std::string& image_path, const MinicpmvPreprocessConfig& config) {
-  std::ifstream f(image_path, std::ios::binary);
-  if (!f) {
-    return absl::NotFoundError(
-        absl::StrFormat("cannot open image: %s", image_path));
-  }
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return PreprocessImageFixed(ss.str(), config);
-}
-
 
 // ============================ Multi-slice ============================
 namespace {
@@ -218,19 +173,6 @@ std::vector<int64_t> ComputePositionIds(int tgt_h, int tgt_w, int pps) {
 
 // Bilinear/bicubic resize an RGB region using PilResizeBicubicRgb; crops [x0,y0,x1,y1)
 // from src then resizes to (dw,dh).
-std::vector<uint8_t> CropAndResize(const uint8_t* src, int SW, int SH,
-                                   int x0, int y0, int x1, int y1,
-                                   int dw, int dh) {
-  const int cw = x1 - x0, ch = y1 - y0;
-  std::vector<uint8_t> crop(static_cast<size_t>(cw) * ch * 3);
-  for (int y = 0; y < ch; ++y)
-    for (int x = 0; x < cw; ++x)
-      for (int c = 0; c < 3; ++c)
-        crop[(static_cast<size_t>(y) * cw + x) * 3 + c] =
-            src[((static_cast<size_t>(y0 + y) * SW + (x0 + x)) * 3) + c];
-  return PilResizeBicubicRgb(crop.data(), cw, ch, dw, dh);
-}
-
 }  // namespace
 
 absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(
@@ -240,7 +182,9 @@ absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(
       reinterpret_cast<const unsigned char*>(image_bytes.data()),
       static_cast<int>(image_bytes.size()), &W, &H, &C, 3);
   if (pixels == nullptr) {
-    return absl::InvalidArgumentError("stb_image failed to decode image");
+    return absl::InvalidArgumentError(
+        absl::StrFormat("stb_image failed to decode image: %s",
+                        stbi_failure_reason() ? stbi_failure_reason() : "?"));
   }
   std::vector<uint8_t> src(pixels, pixels + static_cast<size_t>(W) * H * 3);
   stbi_image_free(pixels);

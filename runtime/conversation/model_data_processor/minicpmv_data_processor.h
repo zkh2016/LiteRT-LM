@@ -19,16 +19,12 @@
 #include <string>
 #include <vector>
 
-#include "support/preprocessor/image_preprocessor.h"  // from @litert
 #include "runtime/conversation/io_types.h"
 #include "runtime/conversation/model_data_processor/minicpmv_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/model_data_processor.h"
 #include "runtime/engine/io_types.h"
 
 namespace litert::lm {
-
-using ::litert::support::ImagePreprocessor;
-using ::litert::support::ImagePreprocessParameter;
 
 // Data processor for MiniCPM-V-4 (SigLIP + Resampler + Llama).
 //
@@ -60,11 +56,8 @@ class MinicpmvDataProcessor
  private:
   explicit MinicpmvDataProcessor(
       MinicpmvDataProcessorConfig config,
-      const PromptTemplateCapabilities& capabilities,
-      std::unique_ptr<ImagePreprocessor> image_preprocessor)
-      : config_(config),
-        capabilities_(capabilities),
-        image_preprocessor_(std::move(image_preprocessor)) {}
+      const PromptTemplateCapabilities& capabilities)
+      : config_(config), capabilities_(capabilities) {}
 
   absl::StatusOr<std::vector<InputData>> ToInputDataVectorImpl(
       const std::string& rendered_template_prompt,
@@ -82,7 +75,6 @@ class MinicpmvDataProcessor
 
   MinicpmvDataProcessorConfig config_;
   PromptTemplateCapabilities capabilities_;
-  std::unique_ptr<ImagePreprocessor> image_preprocessor_;
 };
 
 }  // namespace litert::lm
