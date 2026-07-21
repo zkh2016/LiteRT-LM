@@ -60,9 +60,6 @@ struct MinicpmvSliceConfig {
   int max_slice_nums = 9;
   int num_patches_per_side = 70;  // 980/14; navit position-embedding grid side
   int model_dim = 2560;           // resampler pos_embed dim
-  // Path to the raw f32 [70,70,model_dim] resampler.pos_embed table dumped from
-  // the model. Per-slice pos_embed = table[:tgt_h,:tgt_w]. Required.
-  std::string pos_embed_table_path;
   float norm_mean[3] = {0.5f, 0.5f, 0.5f};
   float norm_std[3] = {0.5f, 0.5f, 0.5f};
 };

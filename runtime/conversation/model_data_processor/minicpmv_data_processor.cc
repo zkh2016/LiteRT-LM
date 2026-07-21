@@ -26,7 +26,6 @@
 #include "absl/status/statusor.h"     // from @com_google_absl
 #include "absl/strings/string_view.h" // from @com_google_absl
 #include "absl/types/span.h"          // from @com_google_absl
-#include <cstdlib>
 #include "absl/container/flat_hash_map.h"
 #include "runtime/components/preprocessor/minicpmv_image_preprocess.h"
 #include "runtime/conversation/model_data_processor/multimodal_processor_helper.h"
@@ -60,12 +59,6 @@ class MinicpmvImagePreprocessor : public ImagePreprocessor {
     constexpr int kMaxL = 1216;
     constexpr int kModelDim = 2560;
     MinicpmvSliceConfig scfg;
-    // pos_embed table shipped next to the runner. Path is fixed for the device
-    // deployment; override via env if needed.
-    const char* env_tbl = std::getenv("MINICPMV_POS_EMBED_TABLE");
-    scfg.pos_embed_table_path =
-        env_tbl ? env_tbl
-                : "/data/local/tmp/litert_qwen3/resampler_pos_embed_70x70.bin";
     ASSIGN_OR_RETURN(MinicpmvSliced sliced,
                      PreprocessImageSliced(std::string(bytes), scfg));
     const int N = static_cast<int>(sliced.slices.size());
@@ -241,10 +234,6 @@ MinicpmvDataProcessor::ToInputDataVectorImpl(
 
   // 2. Slice.
   MinicpmvSliceConfig scfg;
-  const char* env_tbl = std::getenv("MINICPMV_POS_EMBED_TABLE");
-  scfg.pos_embed_table_path =
-      env_tbl ? env_tbl
-              : "/data/local/tmp/litert_qwen3/resampler_pos_embed_70x70.bin";
   ASSIGN_OR_RETURN(MinicpmvSliced sliced, PreprocessImageSliced(image_bytes, scfg));
   const int gx = sliced.grid_x, gy = sliced.grid_y;
 

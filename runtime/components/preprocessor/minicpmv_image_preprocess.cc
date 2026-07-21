@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "runtime/components/preprocessor/minicpmv_image_preprocess.h"
+#include "runtime/components/preprocessor/minicpmv_pos_embed.h"
 
 #include <algorithm>
 #include <cmath>
@@ -285,19 +286,12 @@ absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(
     }
   }
 
-  // Load the 70x70 pos_embed table once ([pps, pps, model_dim] row-major f32).
+  // Compute the [pps, pps, model_dim] 2D sin-cos pos_embed table analytically
+  // (identical to model.resampler.pos_embed, verified bit-exact). Replaces
+  // loading a 50MB external .bin; pure function of (model_dim, pps), no weight
+  // dependency. ~55ms, computed once per PreprocessImageSliced call.
   const int pps = cfg.num_patches_per_side, D = cfg.model_dim;
-  std::vector<float> table;
-  {
-    std::ifstream tf(cfg.pos_embed_table_path, std::ios::binary);
-    if (!tf) {
-      return absl::NotFoundError(absl::StrFormat(
-          "pos_embed table not found: %s", cfg.pos_embed_table_path));
-    }
-    table.resize(static_cast<size_t>(pps) * pps * D);
-    tf.read(reinterpret_cast<char*>(table.data()),
-            static_cast<std::streamsize>(table.size() * sizeof(float)));
-  }
+  const std::vector<float> table = Compute2dSincosPosEmbed(D, pps, pps);
   for (size_t s = 0; s < slice_rgb.size(); ++s) {
     const int sw = slice_wh[s].first, sh = slice_wh[s].second;
     MinicpmvSlice sl;

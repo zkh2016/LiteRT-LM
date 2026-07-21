@@ -83,6 +83,7 @@ cc_library(
     srcs = ["minicpmv_image_preprocess.cc"],
     hdrs = ["minicpmv_image_preprocess.h"],
     deps = [
+        ":minicpmv_pos_embed",
         ":pil_resize",
         "//third_party/minicpmv_vendored:stb_image",
         "@com_google_absl//absl/status",
