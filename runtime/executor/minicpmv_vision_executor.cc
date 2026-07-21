@@ -1,4 +1,4 @@
-// Copyright 2025 The LiteRT Authors.
+// Copyright 2026 The ODML Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@
 #include "tflite/delegates/xnnpack/xnnpack_delegate.h"  // from @litert
 #include "litert/cc/litert_tensor_buffer.h"   // from @litert
 #include "runtime/components/model_resources.h"
+#include "runtime/components/preprocessor/minicpmv_image_preprocess.h"
 #include "runtime/components/preprocessor/minicpmv_pos_embed.h"
 #include "runtime/executor/litert_compiled_model_executor_utils.h"
 #include "runtime/executor/llm_executor_io_types.h"
@@ -72,16 +73,18 @@ using ::litert::Environment;
 using ::litert::Options;
 
 namespace {
-// MiniCPM-V-4 fixed-980 baseline constants.
+// MiniCPM-V-4 fixed-980 baseline constants. kPatchSize / kModelDim / kMaxL are
+// shared with the preprocessor + data processor (see minicpmv_image_preprocess.h)
+// so the tensor layouts stay in agreement.
+constexpr int kPatchSize = kMinicpmvPatchSize;
 constexpr int kImageSize = 980;
-constexpr int kPatchSize = 14;
 constexpr int kGrid = kImageSize / kPatchSize;   // 70
 constexpr int kNumPatches = kGrid * kGrid;       // 4900
 constexpr int kVisionDim = 1152;
-constexpr int kModelDim = 2560;
+constexpr int kModelDim = kMinicpmvModelDim;
 constexpr int kNumQuery = 64;
 // Multi-slice (navit) constants.
-constexpr int kMaxL = 1216;        // fixed padded patch count per slice (navit)
+constexpr int kMaxL = kMinicpmvMaxPatchLen;  // padded patch count per slice
 constexpr int kResamplerL = 4900;  // original resampler's fixed patch length
 }  // namespace
 
@@ -123,8 +126,7 @@ MinicpmvVisionExecutor::Create(
           res_options));
 
   auto executor = absl::WrapUnique(new MinicpmvVisionExecutor(
-      env, std::move(resources), std::move(encoder), std::move(resampler),
-      kNumPatches, kVisionDim, kModelDim, kNumQuery));
+      env, std::move(resources), std::move(encoder), std::move(resampler)));
 
   // Precompute the 2D sin-cos position embedding for the fixed 70x70 grid.
   // Compute2dSincosPosEmbed returns [grid*grid, model_dim] row-major, which is
@@ -215,7 +217,8 @@ absl::StatusOr<ExecutorVisionData> MinicpmvVisionExecutor::Encode(
   if (num_slices <= 0) {
     return absl::InvalidArgumentError("MiniCPM-V: no slices in strips tensor.");
   }
-  const size_t strip_elems = static_cast<size_t>(3) * 14 * kMaxL * 14;
+  const size_t strip_elems =
+      static_cast<size_t>(3) * kPatchSize * kMaxL * kPatchSize;
   LITERT_ASSIGN_OR_RETURN(auto strips_span,
                           ReferTensorBufferAsSpan<float>(it_strips->second));
   LITERT_ASSIGN_OR_RETURN(auto pos_span,

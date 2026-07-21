@@ -276,15 +276,8 @@ absl::StatusOr<DataProcessorConfig> CreateMinicpmvDataProcessorConfig(
         "Minicpmv LlmModelType is required to create "
         "MinicpmvDataProcessorConfig.");
   }
-  MinicpmvDataProcessorConfig config;
-  proto::Minicpmv minicpmv = model_type.minicpmv();
-  if (minicpmv.image_size() != 0) {
-    config.image_size = minicpmv.image_size();
-  }
-  if (minicpmv.image_feature_size() != 0) {
-    config.image_feature_size = minicpmv.image_feature_size();
-  }
-  return config;
+  // MiniCPM-V has no runtime-configurable fields; the config is empty.
+  return MinicpmvDataProcessorConfig{};
 }
 
 absl::StatusOr<DataProcessorConfig> CreateFastVlmDataProcessorConfig(

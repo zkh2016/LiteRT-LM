@@ -1,4 +1,4 @@
-// Copyright 2025 The LiteRT Authors.
+// Copyright 2026 The ODML Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,16 +39,17 @@ using nlohmann::ordered_json;
 // Builds a single-slice TensorBufferMap InputImage from one preprocessed slice.
 // The executor's Encode(map) treats N=1 -> 64 vision tokens.
 absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
-  constexpr int kMaxL = 1216;
-  constexpr int kModelDim = 2560;
-  const size_t strip_elems = static_cast<size_t>(3) * 14 * kMaxL * 14;
+  constexpr int kMaxL = kMinicpmvMaxPatchLen;
+  constexpr int kModelDim = kMinicpmvModelDim;
+  constexpr int kPatch = kMinicpmvPatchSize;
+  const size_t strip_elems = static_cast<size_t>(3) * kPatch * kMaxL * kPatch;
   std::vector<float> strips(strip_elems, 0.0f);
   std::vector<int32_t> posids(kMaxL, 0);
   std::vector<int32_t> nps(1, sl.num_patches);
   std::vector<float> pes(static_cast<size_t>(kMaxL) * kModelDim, 0.0f);
-  const int strip_w = sl.num_patches * 14;
-  const int padded_w = kMaxL * 14;
-  for (int r = 0; r < 3 * 14; ++r) {
+  const int strip_w = sl.num_patches * kPatch;
+  const int padded_w = kMaxL * kPatch;
+  for (int r = 0; r < 3 * kPatch; ++r) {
     std::copy(sl.strip.data() + static_cast<size_t>(r) * strip_w,
               sl.strip.data() + static_cast<size_t>(r) * strip_w + strip_w,
               strips.data() + static_cast<size_t>(r) * padded_w);
@@ -60,8 +61,9 @@ absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
             pes.data());
   LITERT_ASSIGN_OR_RETURN(
       auto strips_t,
-      CopyToTensorBuffer<float>(absl::MakeConstSpan(strips),
-                                ::litert::Dimensions({1, 3, 14, kMaxL * 14})));
+      CopyToTensorBuffer<float>(
+          absl::MakeConstSpan(strips),
+          ::litert::Dimensions({1, 3, kPatch, kMaxL * kPatch})));
   LITERT_ASSIGN_OR_RETURN(
       auto pos_t, CopyToTensorBuffer<int32_t>(absl::MakeConstSpan(posids),
                                               ::litert::Dimensions({1, kMaxL})));

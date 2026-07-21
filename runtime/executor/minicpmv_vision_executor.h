@@ -1,4 +1,4 @@
-// Copyright 2025 The LiteRT Authors.
+// Copyright 2026 The ODML Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,17 +65,11 @@ class MinicpmvVisionExecutor : public VisionExecutor {
  private:
   MinicpmvVisionExecutor(Environment& env,
                          std::unique_ptr<ModelResources> resources,
-                         CompiledModel encoder, CompiledModel resampler,
-                         int num_patches, int vision_dim, int model_dim,
-                         int num_query)
+                         CompiledModel encoder, CompiledModel resampler)
       : env_(env),
         resources_(std::move(resources)),
         encoder_(std::move(encoder)),
-        resampler_(std::move(resampler)),
-        num_patches_(num_patches),
-        vision_dim_(vision_dim),
-        model_dim_(model_dim),
-        num_query_(num_query) {}
+        resampler_(std::move(resampler)) {}
 
   Environment& env_;
   // Owns the mmap'd model buffers that back encoder_/resampler_ weights.
@@ -83,11 +77,6 @@ class MinicpmvVisionExecutor : public VisionExecutor {
   std::unique_ptr<ModelResources> resources_;
   CompiledModel encoder_;    // SigLIP: [1,3,980,980] -> [1,num_patches,vision_dim]
   CompiledModel resampler_;  // [1,num_patches,vision_dim] + pos_embed -> [1,num_query,model_dim]
-
-  int num_patches_ = 4900;   // (980/14)^2
-  int vision_dim_ = 1152;    // SigLIP hidden
-  int model_dim_ = 2560;     // LLM hidden = resampler output dim
-  int num_query_ = 64;       // resampler query count
 
   // Cached 2D sin-cos position embedding, laid out as the resampler's second
   // input expects: [num_patches, 1, model_dim] (row-major grid, batch=1).

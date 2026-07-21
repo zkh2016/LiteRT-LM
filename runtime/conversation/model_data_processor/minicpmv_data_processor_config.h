@@ -1,4 +1,4 @@
-// Copyright 2025 The LiteRT Authors.
+// Copyright 2026 The ODML Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,10 @@
 
 namespace litert::lm {
 
-struct MinicpmvDataProcessorConfig {
-  // Square side the image is resized to (980 = 70 patches * 14).
-  int image_size = 980;
-  // Number of soft-token embeddings the resampler emits per image.
-  int image_feature_size = 64;
-};
+// MiniCPM-V-4 has no runtime-configurable data-processor parameters: the slice
+// geometry and token layout are fixed by the model. Kept as an empty struct so
+// it can participate in the DataProcessorConfig variant like its siblings.
+struct MinicpmvDataProcessorConfig {};
 
 struct MinicpmvDataProcessorArguments {};
 

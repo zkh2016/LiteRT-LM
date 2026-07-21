@@ -311,7 +311,8 @@ absl::StatusOr<std::unique_ptr<Engine>> EngineAdvancedImpl::Create(
         std::move(engine_settings.GetVisionExecutorSettings().value()));
     if (engine_settings.GetLlmMetadata().has_value() &&
         engine_settings.GetLlmMetadata()->llm_model_type().has_minicpmv()) {
-      vision_executor_settings_ptr->SetIsMinicpmv(true);
+      vision_executor_settings_ptr->SetExecutorKind(
+          VisionExecutorKind::kMinicpmv);
     }
     if (vision_executor_settings_ptr->GetAdapterBackend() != Backend::CPU) {
       ABSL_LOG(WARNING) << "Vision adapter backend is not CPU, which may cause "

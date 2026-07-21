@@ -1,4 +1,4 @@
-// Copyright 2025 The LiteRT Authors.
+// Copyright 2026 The ODML Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,13 @@
 
 namespace litert::lm {
 
+// MiniCPM-V-4 geometry, fixed by the bundled tflite models. Shared between the
+// image preprocessor, the data processor (slice tensor packing) and the vision
+// executor so the tensor layouts they exchange stay in agreement.
+inline constexpr int kMinicpmvPatchSize = 14;      // ViT patch edge (px)
+inline constexpr int kMinicpmvModelDim = 2560;     // LLM hidden = resampler out
+inline constexpr int kMinicpmvMaxPatchLen = 1216;  // navit padded patches/slice
+
 // ---- Multi-slice (official) preprocessing ----
 //
 // MiniCPM-V official slicing: an image is split into a thumbnail (source
@@ -32,10 +39,10 @@ namespace litert::lm {
 // consumes these strips with per-slice position_ids and a padding mask.
 struct MinicpmvSliceConfig {
   int scale_resolution = 448;
-  int patch_size = 14;
+  int patch_size = kMinicpmvPatchSize;
   int max_slice_nums = 9;
   int num_patches_per_side = 70;  // 980/14; navit position-embedding grid side
-  int model_dim = 2560;           // resampler pos_embed dim
+  int model_dim = kMinicpmvModelDim;  // resampler pos_embed dim
   float norm_mean[3] = {0.5f, 0.5f, 0.5f};
   float norm_std[3] = {0.5f, 0.5f, 0.5f};
 };

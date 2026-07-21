@@ -314,9 +314,10 @@ message FastVlm {
 }
 
 // MiniCPM-V-4 multimodal (SigLIP vision encoder + Resampler + Llama LLM).
+// All geometry (image size, patch count, resampler token count, hidden dims)
+// is fixed by the tflite models in the bundle and compile-time constants in the
+// runtime; there are currently no runtime-configurable fields.
 message Minicpmv {
-  // The square image side the preprocessor resizes to (default 980 = 70*14).
-  int32 image_size = 1;
-  // Number of soft-token embeddings the resampler emits per image (default 64).
-  int32 image_feature_size = 2;
+  // Previously image_size / image_feature_size, which were never consumed.
+  reserved 1, 2;
 }

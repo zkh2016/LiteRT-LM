@@ -811,14 +811,19 @@ absl::Status ResourceManager::TryLoadingVisionExecutor() {
   }
 
   ABSL_RETURN_IF_ERROR(MaybeCreateLitertEnv());
-  if (vision_executor_settings_->IsMinicpmv()) {
-    ABSL_ASSIGN_OR_RETURN(vision_executor_,
-                          MinicpmvVisionExecutor::Create(
-                              *vision_executor_settings_, *litert_env_));
-  } else {
-    ABSL_ASSIGN_OR_RETURN(vision_executor_,
-                          VisionLiteRtCompiledModelExecutor::Create(
-                              *vision_executor_settings_, *litert_env_));
+  switch (vision_executor_settings_->GetExecutorKind()) {
+    case VisionExecutorKind::kMinicpmv: {
+      ABSL_ASSIGN_OR_RETURN(vision_executor_,
+                            MinicpmvVisionExecutor::Create(
+                                *vision_executor_settings_, *litert_env_));
+      break;
+    }
+    case VisionExecutorKind::kStock: {
+      ABSL_ASSIGN_OR_RETURN(vision_executor_,
+                            VisionLiteRtCompiledModelExecutor::Create(
+                                *vision_executor_settings_, *litert_env_));
+      break;
+    }
   }
   return absl::OkStatus();
 }

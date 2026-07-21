@@ -1116,6 +1116,7 @@ cc_library(
         ":vision_executor",
         ":vision_executor_settings",
         "//runtime/components:model_resources",
+        "//runtime/components/preprocessor:minicpmv_image_preprocess",
         "//runtime/components/preprocessor:minicpmv_pos_embed",
         "//runtime/util:convert_tensor_buffer",
         "//runtime/util:litert_status_util",
