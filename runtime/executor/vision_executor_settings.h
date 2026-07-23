@@ -30,16 +30,6 @@
 
 namespace litert::lm {
 
-// Selects which concrete VisionExecutor the ResourceManager instantiates.
-// ResourceManager sees only the VisionExecutorSettings (not the model type), so
-// the model-specific choice is carried here, set from the LlmModelType oneof in
-// EngineAdvancedImpl::Create. Add a new value per model that needs a bespoke
-// vision executor rather than the stock VisionLiteRtCompiledModelExecutor.
-enum class VisionExecutorKind {
-  kStock = 0,   // VisionLiteRtCompiledModelExecutor (default)
-  kMinicpmv,    // MinicpmvVisionExecutor
-};
-
 // The VisionExecutorSettings class is used to configure the VisionExecutor.
 // It is used to configure the vision encoder and vision adapter models.
 // Args:
@@ -76,8 +66,6 @@ class VisionExecutorSettings : public ExecutorSettingsBase {
   Backend GetAdapterBackend() const;
   // Setter for adapter_backend.
   absl::Status SetAdapterBackend(Backend backend);
-  VisionExecutorKind GetExecutorKind() const { return executor_kind_; }
-  void SetExecutorKind(VisionExecutorKind kind) { executor_kind_ = kind; }
 
   // Getter for scoped_adapter_cache_file.
   std::shared_ptr<litert::lm::ScopedFile> GetScopedAdapterCacheFile() const {
@@ -135,9 +123,6 @@ class VisionExecutorSettings : public ExecutorSettingsBase {
 
   // The backend to use for the vision adapter model.
   Backend adapter_backend_;
-
-  // Which concrete VisionExecutor to build for this model.
-  VisionExecutorKind executor_kind_ = VisionExecutorKind::kStock;
 
   // The cache file to use for the vision encoder model.
   std::shared_ptr<litert::lm::ScopedFile> scoped_encoder_cache_file_;

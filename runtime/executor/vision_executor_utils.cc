@@ -16,6 +16,7 @@
 
 #include <optional>
 
+#include "absl/algorithm/container.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
@@ -84,16 +85,54 @@ GetVisionExecutorPropertiesFromModelResources(ModelResources& model_resources) {
 
   LITERT_ASSIGN_OR_RETURN(auto encoder_input_names,
                           vision_encoder_model->GetSignatureInputNames(0));
-  if (encoder_input_names.size() == 2) {
-    // If the encoder has two input tensors, we asuume it is Vision Transformer
-    // (ViT) with input shape [batch_size, num_patches, patch_dim] for image
-    // tensor, and [batch_size, num_patches, 2] for the positions tensor.
+  if (encoder_input_names.size() >= 2) {
+    // If the encoder has >=2 input tensors, it is a patchified vision model
+    // (images + positions). Two conventions exist:
+    //  - ViT (e.g. Gemma): patch_num_shrink_factor = input_patches /
+    //    output_tokens, read from the model input shape.
+    //  - Fused navit+resampler (e.g. MiniCPM-V): the resampler emits a FIXED
+    //    num_tokens_per_image per image regardless of the (variable) patch
+    //    count, so num_patches/num_tokens is not constant. For those, derive a
+    //    static shrink factor from the positions_xy capacity instead: the data
+    //    processor pads num_patches to a multiple of num_tokens_per_image, so
+    //    num_patches/num_tokens stays exactly 1 per image. Note fused models
+    //    carry an extra conditioning input (e.g. vit_positions), hence >= 2.
+    const bool has_positions_xy =
+        absl::c_linear_search(encoder_input_names, "positions_xy");
     LITERT_ASSIGN_OR_RETURN(auto encoder_input_tensor_type,
                             vision_encoder_model->GetInputTensorType(0, 0));
-    properties.patch_num_shrink_factor =
-        encoder_input_tensor_type.Layout().Dimensions()
-            [encoder_input_tensor_type.Layout().Dimensions().size() - 2] /
-        properties.num_tokens_per_image;
+    if (has_positions_xy && vision_adapter_model == nullptr) {
+      // The positions_xy input is the one whose second-to-last dim is 2 (the
+      // (w,h) coordinate pair); locate it by name rather than assuming index 1.
+      int positions_input_index = -1;
+      for (int i = 0; i < encoder_input_names.size(); ++i) {
+        if (encoder_input_names[i] == "positions_xy") {
+          positions_input_index = i;
+          break;
+        }
+      }
+      if (positions_input_index < 0) {
+        return absl::InvalidArgumentError(
+            "positions_xy input not found in fused vision encoder.");
+      }
+      LITERT_ASSIGN_OR_RETURN(
+          auto positions_tensor_type,
+          vision_encoder_model->GetInputTensorType(0, positions_input_index));
+      const int positions_capacity =
+          positions_tensor_type.Layout().Dimensions()[1];
+      const int shrink = positions_capacity / properties.num_tokens_per_image;
+      if (shrink > 0) {
+        properties.patch_num_shrink_factor = shrink;
+      }
+    } else {
+      // Assume Vision Transformer (ViT) with input shape
+      // [batch_size, num_patches, patch_dim] for image tensor, and
+      // [batch_size, num_patches, 2] for the positions tensor.
+      properties.patch_num_shrink_factor =
+          encoder_input_tensor_type.Layout().Dimensions()
+              [encoder_input_tensor_type.Layout().Dimensions().size() - 2] /
+          properties.num_tokens_per_image;
+    }
   }
   return properties;
 }

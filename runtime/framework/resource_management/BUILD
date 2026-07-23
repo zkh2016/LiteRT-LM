@@ -201,7 +201,6 @@ RESOURCE_MANAGER_DEPS = [
     "//runtime/executor:llm_executor_settings",
     "//runtime/executor:vision_executor",
     "//runtime/executor:vision_executor_settings",
-    "//runtime/executor:minicpmv_vision_executor",
     "//runtime/executor:vision_litert_compiled_model_executor",
     "//runtime/framework/resource_management/context_handler",
     "//runtime/framework/resource_management/utils:movable_mutex_lock",

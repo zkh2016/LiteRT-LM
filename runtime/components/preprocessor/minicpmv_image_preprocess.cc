@@ -245,6 +245,14 @@ absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(
     sl.strip = NormalizeAndReshapeByPatch(slice_rgb[s], sw, sh, patch,
                                           cfg.norm_mean, cfg.norm_std);
     sl.position_ids = ComputePositionIds(sl.tgt_h, sl.tgt_w, pps);
+    // Contiguous per-patch grid coords (col,row); the resampler pos_embed uses
+    // these (table[:tgt_h,:tgt_w]) while the ViT uses the bucketized ids above.
+    sl.grid_w.resize(sl.num_patches);
+    sl.grid_h.resize(sl.num_patches);
+    for (int i = 0; i < sl.num_patches; ++i) {
+      sl.grid_w[i] = i % sl.tgt_w;
+      sl.grid_h[i] = i / sl.tgt_w;
+    }
     // pos_embed = table[:tgt_h, :tgt_w].reshape(num_patches, D), row-major.
     sl.pos_embed.resize(static_cast<size_t>(sl.num_patches) * D);
     for (int r = 0; r < sl.tgt_h; ++r)

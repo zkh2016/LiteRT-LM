@@ -23,6 +23,7 @@
 #include "absl/memory/memory.h"       // from @com_google_absl
 #include "absl/status/status.h"       // from @com_google_absl
 #include "absl/status/statusor.h"     // from @com_google_absl
+#include "absl/strings/str_format.h"  // from @com_google_absl
 #include "absl/strings/string_view.h" // from @com_google_absl
 #include "absl/types/span.h"          // from @com_google_absl
 #include "absl/container/flat_hash_map.h"
@@ -36,49 +37,76 @@ namespace {
 
 using nlohmann::ordered_json;
 
-// Builds a single-slice TensorBufferMap InputImage from one preprocessed slice.
-// The executor's Encode(map) treats N=1 -> 64 vision tokens.
+// Builds a single-slice TensorBufferMap InputImage from one preprocessed slice,
+// in the stock VisionLiteRtCompiledModelExecutor map-Encode contract:
+//   "images"       [1, num_patches, 3*patch*patch]  (patch-flattened, float)
+//   "positions_xy" [1, num_patches, 2]              (int32; bucketized (w,h))
+// The fused vision tflite (navit SigLIP + Resampler, pos_embed baked) turns one
+// such slice directly into 64 vision soft tokens, so each InputImage -> 64.
 absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
-  constexpr int kMaxL = kMinicpmvMaxPatchLen;
-  constexpr int kModelDim = kMinicpmvModelDim;
   constexpr int kPatch = kMinicpmvPatchSize;
-  const size_t strip_elems = static_cast<size_t>(3) * kPatch * kMaxL * kPatch;
-  std::vector<float> strips(strip_elems, 0.0f);
-  std::vector<int32_t> posids(kMaxL, 0);
-  std::vector<int32_t> nps(1, sl.num_patches);
-  std::vector<float> pes(static_cast<size_t>(kMaxL) * kModelDim, 0.0f);
-  const int strip_w = sl.num_patches * kPatch;
-  const int padded_w = kMaxL * kPatch;
-  for (int r = 0; r < 3 * kPatch; ++r) {
-    std::copy(sl.strip.data() + static_cast<size_t>(r) * strip_w,
-              sl.strip.data() + static_cast<size_t>(r) * strip_w + strip_w,
-              strips.data() + static_cast<size_t>(r) * padded_w);
+  const int num_patches = sl.num_patches;
+  const int patch_dim = 3 * kPatch * kPatch;
+  // strip is [3, patch, num_patches*patch] (channel, py, patch*patch_w+px).
+  // Rearrange to [num_patches, 3*patch*patch] (patch, channel, py, px), which
+  // is the conv weight layout flattened the fused model's linear patch-embed
+  // expects.
+  std::vector<float> images(static_cast<size_t>(num_patches) * patch_dim);
+  const int strip_w = num_patches * kPatch;
+  for (int p = 0; p < num_patches; ++p) {
+    for (int ch = 0; ch < 3; ++ch) {
+      for (int py = 0; py < kPatch; ++py) {
+        for (int px = 0; px < kPatch; ++px) {
+          const int col = p * kPatch + px;
+          const float v =
+              sl.strip[(static_cast<size_t>(ch) * kPatch + py) * strip_w + col];
+          images[(static_cast<size_t>(p) * patch_dim) +
+                 ((ch * kPatch + py) * kPatch + px)] = v;
+        }
+      }
+    }
   }
-  for (int k = 0; k < sl.num_patches && k < kMaxL; ++k)
-    posids[k] = static_cast<int32_t>(sl.position_ids[k]);
-  std::copy(sl.pos_embed.data(),
-            sl.pos_embed.data() + static_cast<size_t>(sl.num_patches) * kModelDim,
-            pes.data());
+  // positions_xy: CONTIGUOUS per-patch grid coords (w,h) for the resampler's
+  // pos_embed; padded rows are -1. (The ViT's bucketized ids live in
+  // "vit_positions"; the fused model uses each where appropriate.)
+  std::vector<int32_t> positions_xy(static_cast<size_t>(num_patches) * 2);
+  std::vector<int32_t> vit_positions(static_cast<size_t>(num_patches) * 2);
+  constexpr int kPps = kMinicpmvNumPatchesPerSide;
+  for (int i = 0; i < num_patches; ++i) {
+    const int64_t id = sl.position_ids[i];  // bucketized 70x70 linear id (or -1)
+    if (id < 0) {
+      positions_xy[static_cast<size_t>(i) * 2 + 0] = -1;
+      positions_xy[static_cast<size_t>(i) * 2 + 1] = -1;
+      vit_positions[static_cast<size_t>(i) * 2 + 0] = -1;
+      vit_positions[static_cast<size_t>(i) * 2 + 1] = -1;
+    } else {
+      positions_xy[static_cast<size_t>(i) * 2 + 0] = sl.grid_w[i];
+      positions_xy[static_cast<size_t>(i) * 2 + 1] = sl.grid_h[i];
+      vit_positions[static_cast<size_t>(i) * 2 + 0] =
+          static_cast<int32_t>(id % kPps);
+      vit_positions[static_cast<size_t>(i) * 2 + 1] =
+          static_cast<int32_t>(id / kPps);
+    }
+  }
   LITERT_ASSIGN_OR_RETURN(
-      auto strips_t,
+      auto images_t,
       CopyToTensorBuffer<float>(
-          absl::MakeConstSpan(strips),
-          ::litert::Dimensions({1, 3, kPatch, kMaxL * kPatch})));
+          absl::MakeConstSpan(images),
+          ::litert::Dimensions({1, num_patches, patch_dim})));
   LITERT_ASSIGN_OR_RETURN(
-      auto pos_t, CopyToTensorBuffer<int32_t>(absl::MakeConstSpan(posids),
-                                              ::litert::Dimensions({1, kMaxL})));
+      auto pos_t,
+      CopyToTensorBuffer<int32_t>(
+          absl::MakeConstSpan(positions_xy),
+          ::litert::Dimensions({1, num_patches, 2})));
   LITERT_ASSIGN_OR_RETURN(
-      auto np_t, CopyToTensorBuffer<int32_t>(absl::MakeConstSpan(nps),
-                                             ::litert::Dimensions({1})));
-  LITERT_ASSIGN_OR_RETURN(
-      auto pe_t, CopyToTensorBuffer<float>(
-                     absl::MakeConstSpan(pes),
-                     ::litert::Dimensions({1, kMaxL, kModelDim})));
+      auto vit_t,
+      CopyToTensorBuffer<int32_t>(
+          absl::MakeConstSpan(vit_positions),
+          ::litert::Dimensions({1, num_patches, 2})));
   absl::flat_hash_map<std::string, ::litert::TensorBuffer> m;
-  m.emplace("strips", std::move(strips_t));
-  m.emplace("position_ids", std::move(pos_t));
-  m.emplace("num_patches", std::move(np_t));
-  m.emplace("pos_embed", std::move(pe_t));
+  m.emplace("images", std::move(images_t));
+  m.emplace("positions_xy", std::move(pos_t));
+  m.emplace("vit_positions", std::move(vit_t));
   return InputImage(std::move(m));
 }
 
@@ -152,6 +180,42 @@ MinicpmvDataProcessor::ToInputDataVectorImpl(
   MinicpmvSliceConfig scfg;
   ASSIGN_OR_RETURN(MinicpmvSliced sliced, PreprocessImageSliced(image_bytes, scfg));
   const int gx = sliced.grid_x, gy = sliced.grid_y;
+
+  // Pad every slice to the fused vision signature length (kMinicpmvMaxPatchLen).
+  // The stock map-Encode derives tokens as ceil(num_patches / shrink) with
+  // shrink = signature_capacity / num_tokens_per_image (= 1088/64 = 17), so
+  // padding to 1088 always yields exactly 64 soft tokens per slice. Padded
+  // rows use positions_xy = -1 and are ignored by the fused model's valid mask.
+  //
+  // Important: strip is [3, patch, num_patches*patch] row-major. Simply
+  // resizing the flat buffer keeps the OLD row stride, so BuildSliceImage
+  // (which indexes with the NEW wider stride) would mis-read every channel
+  // after the first. Re-pack into a wider strip explicitly.
+  for (auto& sl : sliced.slices) {
+    const int np = sl.num_patches;
+    const int padded = kMinicpmvMaxPatchLen;
+    if (np > padded) {
+      return absl::InvalidArgumentError(absl::StrFormat(
+          "MiniCPM-V slice has %d patches > fused signature capacity %d", np,
+          padded));
+    }
+    if (padded != np) {
+      constexpr int kPatch = kMinicpmvPatchSize;
+      const int old_w = np * kPatch;
+      const int new_w = padded * kPatch;
+      std::vector<float> wide(static_cast<size_t>(3) * kPatch * new_w, 0.0f);
+      for (int r = 0; r < 3 * kPatch; ++r) {
+        std::copy(sl.strip.data() + static_cast<size_t>(r) * old_w,
+                  sl.strip.data() + static_cast<size_t>(r) * old_w + old_w,
+                  wide.data() + static_cast<size_t>(r) * new_w);
+      }
+      sl.strip = std::move(wide);
+      sl.num_patches = padded;
+      sl.position_ids.resize(padded, -1);  // -1 -> positions_xy (-1,-1) -> pad
+      sl.grid_w.resize(padded, 0);
+      sl.grid_h.resize(padded, 0);
+    }
+  }
 
   // 3. Split the rendered prompt at the single <image_soft_token> marker.
   std::string rendered(rendered_template_prompt);

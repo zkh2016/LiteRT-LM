@@ -28,7 +28,13 @@ namespace litert::lm {
 // executor so the tensor layouts they exchange stay in agreement.
 inline constexpr int kMinicpmvPatchSize = 14;      // ViT patch edge (px)
 inline constexpr int kMinicpmvModelDim = 2560;     // LLM hidden = resampler out
-inline constexpr int kMinicpmvMaxPatchLen = 1216;  // navit padded patches/slice
+// Historical navit max (legacy multi-sig). Official slicing (scale=448) produces
+// at most ~1036 patches/slice in practice; the fused vision model is exported
+// with a single signature of this length (17*64, multiple of resampler tokens).
+inline constexpr int kMinicpmvMaxPatchLen = 1088;
+inline constexpr int kMinicpmvNumPatchesPerSide = 70;  // 980/14 pos-embed grid side
+// Soft tokens per slice from the resampler (also the LLM placeholder count).
+inline constexpr int kMinicpmvTokensPerSlice = 64;
 
 // ---- Multi-slice (official) preprocessing ----
 //
@@ -54,6 +60,11 @@ struct MinicpmvSlice {
   int tgt_w = 0;                // patch cols  (W/patch)
   int num_patches = 0;          // tgt_h * tgt_w
   std::vector<int64_t> position_ids;  // [num_patches], bucketized to the 70x70 grid
+  // Per-patch CONTIGUOUS grid coords (col,row) in the slice's own tgt_w x tgt_h
+  // grid. The ViT uses the bucketized position_ids above; the resampler's
+  // pos_embed uses these contiguous coords (table[:tgt_h,:tgt_w]).
+  std::vector<int32_t> grid_w;  // [num_patches]
+  std::vector<int32_t> grid_h;  // [num_patches]
   std::vector<float> pos_embed;       // [num_patches, model_dim] sub-grid of the 70x70 table
 };
 
