@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_KV_CACHE_INTERFACE_H_
-#define THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_KV_CACHE_INTERFACE_H_
+#ifndef THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_STATE_INTERFACE_H_
+#define THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_STATE_INTERFACE_H_
 
 #include <memory>
 #include <string>
@@ -25,9 +25,9 @@
 namespace litert::lm {
 
 // The KV cache interface including all K and V buffers for a model.
-class KVCacheInterface {
+class StateInterface {
  public:
-  virtual ~KVCacheInterface() = default;
+  virtual ~StateInterface() = default;
 
   // Returns the total number of entries in the KV cache per block.
   virtual int GetNumEntries() const = 0;
@@ -39,7 +39,7 @@ class KVCacheInterface {
   virtual absl::StatusOr<std::string> Serialize() const = 0;
 
   // Loads the KV cache from a serialized byte string.
-  virtual absl::Status Load(absl::string_view serialized_kv_cache) = 0;
+  virtual absl::Status Load(absl::string_view serialized_state) = 0;
 
   // Selects a single batch from the other KV cache and copies it to this KV
   // cache.
@@ -47,7 +47,7 @@ class KVCacheInterface {
   //   This has shape [1, ...] and other has shape [3, ...]. Then we can select
   //   batch x from other and copy it to this
   //   (i.e., other[x, :, ...] -> this[0, :, ...]).
-  virtual absl::Status SelectAndCopyFrom(KVCacheInterface& other,
+  virtual absl::Status SelectAndCopyFrom(StateInterface& other,
                                          int batch_index) = 0;
 
   // Broadcasts the source KV with batch size 1 to this KV cache with batch size
@@ -55,13 +55,22 @@ class KVCacheInterface {
   // Example:
   //   This has shape [3, ...] and other has shape [1, ...]. Then we can copy
   //   other[0, :, ...] -> this[0, :, ...], this[1, :, ...], this[2, :, ...].
-  virtual absl::Status BroadcastAndCopyFrom(KVCacheInterface& other) = 0;
+  virtual absl::Status BroadcastAndCopyFrom(StateInterface& other) = 0;
 
   // Deep copies the KV cache. This is an expensive operation. Use sparingly.
-  virtual absl::StatusOr<std::unique_ptr<KVCacheInterface>> DeepCopy()
-      const = 0;
+  virtual absl::StatusOr<std::unique_ptr<StateInterface>> DeepCopy() const = 0;
+
+  // Returns true if this state container holds the tensor with the specified
+  // `tensor_name`. The lookup maps to the signature input/output names of the
+  // model.
+  virtual bool Contains(absl::string_view tensor_name) const = 0;
+
+  // Zeroes out all the buffers held in this state container. Should attempt to
+  // perform the operation asynchronously if the underlying buffers support
+  // asynchronous operations.
+  virtual absl::Status Clear() = 0;
 };
 
 }  // namespace litert::lm
 
-#endif  // THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_KV_CACHE_INTERFACE_H_
+#endif  // THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_STATE_INTERFACE_H_

@@ -41,6 +41,9 @@
   import Foundation
   import FoundationModels
   import LiteRTLM
+  import os
+
+  private let logger = Logger()
 
   // MARK: - Model
 
@@ -51,16 +54,25 @@
 
     public let capabilities: LanguageModelCapabilities
     public let executorConfiguration: LiteRTLMExecutor.Configuration
+    public let visualTokenBudget: Int32?
 
     /// Build from an `EngineConfig` (the primary initializer). The whole config is
-    /// carried through to the engine verbatim — including `cacheDir` and `loraRank`.
+    /// carried through to the engine verbatim — including `cacheDir`, `loraRank`,
+    /// `audioLoraRank` and `maxNumImages`.
     ///
     /// - Parameters:
     ///   - engineConfig: How to build the LiteRT engine.
-    public init(engineConfig: EngineConfig) {
+    ///   - visualTokenBudget: Per-image visual-token cap (an `ExperimentalFlags`
+    ///     value, not part of `EngineConfig`); nil = engine default.
+    public init(engineConfig: EngineConfig, visualTokenBudget: Int32? = nil) {
+      self.visualTokenBudget = visualTokenBudget
       self.executorConfiguration = LiteRTLMExecutor.Configuration(
         engineConfig: engineConfig)
-      let capabilities: [LanguageModelCapabilities.Capability] = [.guidedGeneration, .toolCalling]
+      let capabilities: [LanguageModelCapabilities.Capability] = {
+        var caps: [LanguageModelCapabilities.Capability] = [.guidedGeneration, .toolCalling]
+        if engineConfig.visionBackend != nil { caps.append(.vision) }
+        return caps
+      }()
       self.capabilities = LanguageModelCapabilities(capabilities)
     }
 
@@ -72,6 +84,9 @@
     /// - Parameters:
     ///   - modelPath: Absolute path to an on-disk `.litertlm`.
     ///   - backend: Main compute backend (default `.gpu`).
+    ///   - visionBackend / audioBackend: Backend per encoder tower, or nil to leave
+    ///     that tower off (the safe default for a text-only model).
+    ///   - visualTokenBudget: Per-image visual-token cap (nil = engine default).
     ///   - maxTokens: KV/context budget (nil = model/engine default).
     ///   - cacheDir: Where the engine writes its cache files (nil = the app's Caches
     ///     directory).
@@ -79,6 +94,9 @@
     public init(
       modelPath: String,
       backend: Backend = .gpu,
+      visionBackend: Backend? = nil,
+      audioBackend: Backend? = nil,
+      visualTokenBudget: Int32? = nil,
       maxTokens: Int? = 2048,
       cacheDir: String? = nil
     ) throws {
@@ -86,7 +104,9 @@
       self.init(
         engineConfig: try EngineConfig(
           modelPath: modelPath, backend: backend,
-          maxNumTokens: maxTokens, cacheDir: cacheDir ?? caches?.path))
+          visionBackend: visionBackend, audioBackend: audioBackend,
+          maxNumTokens: maxTokens, cacheDir: cacheDir ?? caches?.path),
+        visualTokenBudget: visualTokenBudget)
     }
 
     /// Release every cached LiteRT engine built for FM sessions, freeing their
@@ -154,7 +174,8 @@
         with: ConversationConfig(
           systemMessage: plan.systemMessage,
           initialMessages: plan.history,
-          samplerConfig: Self.sampler(for: request.generationOptions, structured: structured)))
+          samplerConfig: Self.sampler(for: request.generationOptions, structured: structured),
+          visualTokenBudget: model.visualTokenBudget))
 
       if !tools.isEmpty {
         var full = ""
@@ -356,14 +377,40 @@
       return try? SamplerConfig(topK: topK, topP: topP, temperature: temperature)
     }
 
-    /// Map FM segments to LiteRT text content.
+    /// Map FM segments to LiteRT content: text, image attachments, and audio/video
+    /// via the custom segments.
     private static func contents(of segments: [Transcript.Segment]) -> [Content] {
       var out: [Content] = []
       for segment in segments {
         switch segment {
         case .text(let t):
           if !t.content.isEmpty { out.append(.text(t.content)) }
-        default:
+        case .attachment(let attachment):
+          guard case .image(let image) = attachment.content else {
+            logger.warning(
+              "LiteRT-LM: Unsupported attachment type. Only images are supported via .attachment.")
+            break
+          }
+          guard let png = pngData(from: image.cgImage) else {
+            logger.warning(
+              "LiteRT-LM: Failed to convert CGImage to PNG data. Image attachment ignored.")
+            break
+          }
+          out.append(.imageData(png))
+        case .custom(let custom):
+          switch custom {
+          case let audio as LiteRTAudioSegment:
+            out.append(.audioData(audio.content.data))
+          case let video as LiteRTVideoSegment:
+            out.append(contentsOf: video.content.frames.map { Content.imageData($0) })
+          default:
+            logger.warning(
+              "LiteRT-LM: Unsupported custom segment type \(String(describing: type(of: custom))). Segment ignored."
+            )
+          }
+        case .structure:
+          break
+        @unknown default:
           break
         }
       }
@@ -436,6 +483,9 @@
     }
 
     func ready() async throws -> Engine {
+      // Memoize the in-flight initialization task as a guard rail against double-loads.
+      // Without this, multiple concurrent requests could trigger redundant multi-GB
+      // engine initializations.
       if let engineTask { return try await engineTask.value }
       let configuration = self.configuration
       let task = Task {

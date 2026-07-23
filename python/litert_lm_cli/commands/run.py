@@ -198,6 +198,8 @@ def run_interactive(
     cache: str | None = None,
     cpu_thread_count: int | None = None,
     activation_data_type: litert_lm.ActivationDataType | None = None,
+    ringbuffers_local_attention: bool | None = None,
+    gpu_decode_steps_per_sync: int | None = None,
 ) -> None:
   """Runs the model interactively or with a single prompt."""
   if speculative_decoding is None:
@@ -229,9 +231,16 @@ def run_interactive(
         temperature, model_obj, "temperature"
     )
     seed = model.resolve_config_option(seed, model_obj, "seed")
+    thinking = model.resolve_config_option(thinking, model_obj, "thinking")
+    thinking_budget = model.resolve_config_option(
+        thinking_budget, model_obj, "thinking_budget"
+    )
 
     backend_val = model.parse_backend(
-        backend, model_obj=model_obj, cpu_thread_count=cpu_thread_count
+        backend,
+        model_obj=model_obj,
+        cpu_thread_count=cpu_thread_count,
+        gpu_decode_steps_per_sync=gpu_decode_steps_per_sync,
     )
     vision_backend_val = model.parse_backend(
         vision_backend,
@@ -288,6 +297,7 @@ def run_interactive(
           audio_backend=audio_backend_val,
           cache_dir=cache_dir_val,
           activation_data_type=activation_data_type,
+          use_ringbuffers_local_attention=ringbuffers_local_attention,
       )
 
     with engine_cm as engine:
@@ -575,6 +585,8 @@ def run(
     cache: str | None = None,
     cpu_thread_count: int | None = None,
     activation_data_type: str | None = None,
+    ringbuffers_local_attention: bool | None = None,
+    gpu_decode_steps_per_sync: int | None = None,
 ) -> None:
   r"""Runs a LiteRT-LM model interactively or with a single prompt.
 
@@ -614,6 +626,10 @@ def run(
     cache: The cache mode to use (no, memory, or disk).
     cpu_thread_count: The number of threads to use for CPU backend.
     activation_data_type: The activation data type to use for inference.
+    ringbuffers_local_attention: Whether to use ringbuffers for local attention
+      KV cache to minimize memory usage.
+    gpu_decode_steps_per_sync: The number of decode steps per sync for GPU
+      backend. Only applied to supported GPU models. Otherwise, ignored.
   """
   if speculative_decoding is None:
     speculative_decoding = enable_speculative_decoding
@@ -742,6 +758,8 @@ def run(
           if activation_data_type
           else None
       ),
+      ringbuffers_local_attention=ringbuffers_local_attention,
+      gpu_decode_steps_per_sync=gpu_decode_steps_per_sync,
   )
 
 

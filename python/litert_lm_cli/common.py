@@ -22,6 +22,32 @@ import textwrap
 
 import click
 
+from litert_lm_cli import config
+
+
+def parse_config_opt(unused_ctx, unused_param, value):
+  """Click callback for --config option to set the custom config path."""
+  if value is not None:
+    config.set_config_path(value)
+  return value
+
+
+def config_option(f):
+  """Decorator for the --config option."""
+  f = click.option(
+      "--config",
+      type=click.Path(exists=True, dir_okay=False, path_type=str),
+      default=None,
+      callback=parse_config_opt,
+      is_eager=True,
+      expose_value=False,
+      help=(
+          "Path to a custom config.json file to use instead of the default"
+          " ~/.litert-lm/config.json."
+      ),
+  )(f)
+  return f
+
 
 def parse_bool_opt(unused_ctx, unused_param, value):
   """Click callback to parse boolean option strings into bool | None.
@@ -112,6 +138,7 @@ def huggingface_options(f):
 
 def common_inference_options(f):
   """Decorator for common options shared across commands."""
+  f = config_option(f)
   f = huggingface_options(f)
   f = click.option(
       "--verbose",
@@ -177,6 +204,15 @@ def common_inference_options(f):
       ),
   )(f)
   f = click.option(
+      "--gpu-decode-steps-per-sync",
+      type=click.IntRange(min=1),
+      default=None,
+      help=(
+          "The number of decode steps per sync for GPU backend. Only applied"
+          " to supported GPU models. Otherwise, ignored."
+      ),
+  )(f)
+  f = click.option(
       "--activation-data-type",
       type=click.Choice(
           ["fp32", "fp16", "int16", "int8"], case_sensitive=False
@@ -188,6 +224,21 @@ def common_inference_options(f):
           " default from the engine. Note: This option is experimental and may"
           " not always work.  Currently, it can be used to force FP32 mode when"
           " using a GPU backend."
+      ),
+  )(f)
+  f = click.option(
+      "--ringbuffers-local-attention",
+      is_flag=False,
+      flag_value="true",
+      type=click.Choice(["true", "false"], case_sensitive=False),
+      default=None,
+      hidden=True,
+      callback=parse_bool_opt,
+      help=(
+          "Whether to use ringbuffers for local attention KV cache to minimize"
+          " memory usage on supported models. When disabled, memory is"
+          " allocated for the full context length, enabling instant rewinding"
+          " at higher memory cost."
       ),
   )(f)
   return f

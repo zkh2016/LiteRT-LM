@@ -32,6 +32,7 @@ message LlmModelType {
     Gemma4 gemma4 = 8;
     FastVlm fast_vlm = 9;
     Minicpmv minicpmv = 10;
+    Lfm2 lfm2 = 11;
   }
 }
 
@@ -320,4 +321,35 @@ message FastVlm {
 message Minicpmv {
   // Previously image_size / image_feature_size, which were never consumed.
   reserved 1, 2;
+}
+
+// LFM Model
+message Lfm2 {
+  TokenUnion start_of_image_token = 1;
+  // The end of image token indicates the end of image
+  TokenUnion end_of_image_token = 2;
+
+  // The patch width that the image preprocessor should patchify the image to.
+  int32 patch_width = 3;
+  // The patch height that the image preprocessor should patchify the image to.
+  int32 patch_height = 4;
+
+  // The maximum number of patches that the image preprocessor should patchify
+  // the image to.
+  int32 max_num_patches = 5;
+
+  // The pooling kernel size that the image preprocessor should use for
+  // patchifying the image.
+  int32 pooling_kernel_size = 6;
+
+  // The height of the image tensor that the image preprocessor should resize
+  // to.
+  int32 image_tensor_height = 7;
+  // The width of the image tensor that the image preprocessor should resize to.
+  int32 image_tensor_width = 8;
+
+  // Image normalization parameters.
+  repeated float normalization_mean = 9;
+  repeated float normalization_std = 10;
+  float normalization_rescale_factor = 11;
 }

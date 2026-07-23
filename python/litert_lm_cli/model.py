@@ -176,13 +176,17 @@ def model_default_backend(
 
 
 def _create_backend_obj(
-    backend_name: str | None, cpu_thread_count: int | None = None
+    backend_name: str | None,
+    cpu_thread_count: int | None = None,
+    gpu_decode_steps_per_sync: int | None = None,
 ) -> litert_lm.Backend | None:
   """Creates a litert_lm.Backend object from name, or returns None."""
   if backend_name is None:
     return None
   elif backend_name == "gpu":
-    return litert_lm.Backend.GPU()
+    return litert_lm.Backend.GPU(
+        gpu_decode_steps_per_sync=gpu_decode_steps_per_sync
+    )
   elif backend_name == "npu":
     return litert_lm.Backend.NPU()
   else:
@@ -198,6 +202,7 @@ def parse_backend(
         str
     ] = _DEFAULT_TARGET_MODEL_TYPES,
     label: str | None = None,
+    gpu_decode_steps_per_sync: int | None = None,
 ) -> litert_lm.Backend | None:
   """Parses the backend string and resolves it against model constraints.
 
@@ -209,6 +214,7 @@ def parse_backend(
       default backend. Defaults to main model types.
     label: Optional label for the backend (e.g., "audio", "vision") used in log
       messages.
+    gpu_decode_steps_per_sync: Optional decode steps per sync for GPU backend.
 
   Returns:
     The resolved litert_lm.Backend to use, or None if not supported.
@@ -275,7 +281,29 @@ def parse_backend(
         )
     )
 
-  return _create_backend_obj(resolved_backend.lower(), resolved_threads)
+  # 3. Resolve GPU Decode Steps Per Sync
+  resolved_gpu_decode_steps_per_sync = gpu_decode_steps_per_sync
+  gpu_decode_steps_from_config = False
+  if resolved_gpu_decode_steps_per_sync is None:
+    if is_main_model and model_cfg.gpu_decode_steps_per_sync is not None:
+      resolved_gpu_decode_steps_per_sync = model_cfg.gpu_decode_steps_per_sync
+      gpu_decode_steps_from_config = True
+
+  # Print info message if gpu_decode_steps_per_sync came from config
+  if gpu_decode_steps_from_config:
+    click.echo(
+        click.style(
+            "Using gpu_decode_steps_per_sync from config for model"
+            f" '{model_obj.model_id}': {resolved_gpu_decode_steps_per_sync}",
+            fg="bright_black",
+        )
+    )
+
+  return _create_backend_obj(
+      resolved_backend.lower(),
+      resolved_threads,
+      resolved_gpu_decode_steps_per_sync,
+  )
 
 
 def resolve_config_option(

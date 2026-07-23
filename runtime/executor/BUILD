@@ -13,6 +13,8 @@
 # limitations under the License.
 
 # [Google-internal load of `cc_library`]
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 
 package(
     default_hdrs_check = "strict",
@@ -122,6 +124,8 @@ cc_library(
     hdrs = ["litert_compiled_model_executor_utils.h"],
     deps = [
         ":executor_settings_base",
+        ":llm_executor_io_types",
+        ":llm_executor_settings",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/log:absl_log",
@@ -165,6 +169,7 @@ cc_test(
     deps = [
         ":executor_settings_base",
         ":litert_compiled_model_executor_utils",
+        ":llm_executor_settings",
         "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -186,6 +191,50 @@ cc_test(
         "//runtime/util:scoped_file",
         "//runtime/util:test_utils",
         "@litert//tflite/types:half",
+    ],
+)
+
+# Flags to configure the static GPU accelerator backend for Apple targets (iOS and macOS).
+# By default, iOS uses Metal ("metal") and macOS uses WebGPU ("webgpu").
+# Pass --//runtime/executor:gpu_accelerator=webgpu or =metal to override.
+string_flag(
+    name = "gpu_accelerator",
+    build_setting_default = "default",
+    values = [
+        "default",
+        "metal",
+        "webgpu",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "gpu_accelerator_webgpu_setting",
+    flag_values = {
+        ":gpu_accelerator": "webgpu",
+    },
+)
+
+config_setting(
+    name = "gpu_accelerator_metal_setting",
+    flag_values = {
+        ":gpu_accelerator": "metal",
+    },
+)
+
+selects.config_setting_group(
+    name = "ios_webgpu",
+    match_all = [
+        "@platforms//os:ios",
+        ":gpu_accelerator_webgpu_setting",
+    ],
+)
+
+selects.config_setting_group(
+    name = "macos_metal",
+    match_all = [
+        "@platforms//os:macos",
+        ":gpu_accelerator_metal_setting",
     ],
 )
 
@@ -246,9 +295,9 @@ cc_library(
         ":llm_executor_processed_tokens",
         ":llm_executor_settings",
         ":llm_executor_settings_utils",
-        ":llm_litert_compiled_model_cache_utils",
         ":llm_litert_mtp_drafter",
         ":llm_processed_context",
+        ":state_interface",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -283,6 +332,8 @@ cc_library(
         "//runtime/components:sampler_factory",
         "//runtime/components/embedding_lookup:embedding_lookup_manager",
         "//runtime/components/logits_processor",
+        "//runtime/executor/litert:state",
+        "//runtime/proto:executor_metadata_cc_proto",
         "//runtime/util:convert_tensor_buffer",
         "//runtime/util:litert_status_util",
         "//runtime/util:log_tensor_buffer",
@@ -348,9 +399,7 @@ cc_library(
     deps = [
         ":llm_executor_io_types",
         ":llm_executor_processed_tokens",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings:string_view",
-        "@litert//litert/cc:litert_tensor_buffer",
+        ":state_interface",
     ],
 )
 
@@ -569,6 +618,7 @@ cc_library(
         "//runtime/components:model_resources",
         "//runtime/components/embedding_lookup:embedding_lookup_manager",
         "//runtime/components/logits_processor",
+        "//runtime/executor/litert:legacy_map_state",
         "//runtime/util:convert_tensor_buffer",
         "//runtime/util:litert_status_util",
         "//runtime/util:tensor_buffer_util",
@@ -1020,6 +1070,7 @@ cc_library(
         ":litert_compiled_model_executor_utils",
         ":llm_executor_settings",
         ":llm_executor_settings_utils",
+        ":state_interface",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/memory",
@@ -1039,6 +1090,7 @@ cc_library(
         "//runtime/components:sampler",
         "//runtime/components:sampler_factory",
         "//runtime/components/embedding_lookup:embedding_lookup_manager",
+        "//runtime/executor/litert:state",
         "//runtime/util:convert_tensor_buffer",
         "//runtime/util:litert_status_util",
     ],
@@ -1048,8 +1100,8 @@ cc_library(
 # Interfaces
 # ==================================================================================================
 cc_library(
-    name = "kv_cache_interface",
-    hdrs = ["kv_cache_interface.h"],
+    name = "state_interface",
+    hdrs = ["state_interface.h"],
     deps = [
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1062,8 +1114,8 @@ cc_library(
     hdrs = ["llm_executor_interface.h"],
     deps = [
         ":executor_settings_base",
-        ":kv_cache_interface",
         ":llm_executor_io_types",
+        ":state_interface",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@litert//litert/cc:litert_tensor_buffer",

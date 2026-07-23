@@ -22,6 +22,7 @@
 #include "runtime/conversation/model_data_processor/gemma3_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/gemma4_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/generic_data_processor_config.h"
+#include "runtime/conversation/model_data_processor/lfm2_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/minicpmv_data_processor_config.h"
 #include "runtime/conversation/model_data_processor/qwen3_data_processor_config.h"
 
@@ -33,10 +34,8 @@ namespace litert::lm {
 using DataProcessorConfig =
     std::variant<Gemma3DataProcessorConfig, GenericDataProcessorConfig,
                  Qwen3DataProcessorConfig, FunctionGemmaDataProcessorConfig,
-                 Gemma4DataProcessorConfig,
-                 FastVlmDataProcessorConfig,
-                 MinicpmvDataProcessorConfig
-                 >;
+                 Gemma4DataProcessorConfig, FastVlmDataProcessorConfig,
+                 Lfm2DataProcessorConfig, MinicpmvDataProcessorConfig>;
 
 // DataProcessorArguments is a registry of all the model-specific data processor
 // arguments. The DataProcessorArguments is used to pass arguments of single
@@ -45,10 +44,8 @@ using DataProcessorArguments =
     std::variant<std::monostate, GenericDataProcessorArguments,
                  Gemma3DataProcessorArguments, Qwen3DataProcessorArguments,
                  FunctionGemmaDataProcessorArguments,
-                 Gemma4DataProcessorArguments,
-                 FastVlmDataProcessorArguments,
-                 MinicpmvDataProcessorArguments
-                 >;
+                 Gemma4DataProcessorArguments, FastVlmDataProcessorArguments,
+                 Lfm2DataProcessorArguments, MinicpmvDataProcessorArguments>;
 
 }  // namespace litert::lm
 

@@ -262,7 +262,8 @@ public actor Engine {
       toolManager: toolManager,
       automaticToolCalling: conversationConfig.automaticToolCalling,
       engine: self,
-      enableResponseFormat: conversationConfig.enableResponseFormat)
+      enableResponseFormat: conversationConfig.enableResponseFormat,
+      visualTokenBudget: conversationConfig.visualTokenBudget)
   }
 
   deinit {

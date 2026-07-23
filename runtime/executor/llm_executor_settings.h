@@ -44,7 +44,9 @@ struct GpuArtisanConfig {
   bool wait_for_weight_uploads = false;
 
   // Number of decode steps per sync. Used by GPU only.
-  uint32_t num_decode_steps_per_sync = 1;
+  // Note: dynamic constraints with constrained decoding currently need this to
+  // be set to 1, but otherwise 3 is a more performant default.
+  uint32_t num_decode_steps_per_sync = 3;
 
   // Sequence batch size for encoding. Used by GPU only. Number of input
   // tokens to process at a time for batch processing. Setting this value to 1
@@ -78,7 +80,15 @@ struct GpuArtisanConfig {
   bool use_submodel = false;
 
   // Whether to prefer texture weights over buffers.
+  // We default to buffer weights on Apple platforms, and textures otherwise.
+  // MLDrift often overrides this internally, so this default is more for code
+  // consistency, since it should match LiteRT-LM's settings in other locations,
+  // like litert_lm/runtime/executor/litert_compiled_model_executor_utils.cc.
+#ifdef __APPLE__
+  bool prefer_texture_weights = false;
+#else
   bool prefer_texture_weights = true;
+#endif  // __APPLE__
 
   // Whether the backend should directly map host memory to the GPU if possible.
   bool set_enable_host_mapped_pointer = true;
@@ -146,6 +156,42 @@ struct NpuConfig {
   bool enable_npu_debug_logging = false;
 };
 std::ostream& operator<<(std::ostream& os, const NpuConfig& config);
+
+// The policy of the attention mask.
+enum class AttentionMaskPolicy {
+  // All tokens are causal.
+  kCausal = 0,
+  // All tokens are bidirectional.
+  kBidirectional = 1,
+  // Only vision tokens are bidirectional, other tokens are causal.
+  kVisionBidirectional = 2,
+};
+
+// Settings for the attention mask.
+struct AttentionMaskSettings {
+  // TODO(b/527108132): Read attention mask policies from the ExecutorMetadata.
+  // The policy of the attention mask.
+  // Note: If the text decoder tflite model only expects one attention mask as
+  // input, this policy will be used, and such model might apply local attention
+  // mask inside tflite graph. If the text decoder tflite model expects two
+  // attention mask inputs, global_mask and local_mask, this policy will be used
+  // as the global attention mask, and the local attention mask will be
+  // determined by the local_attention_mask_policy. If
+  // local_attention_mask_policy is not set, it will be the same as the global
+  // attention mask policy.
+  AttentionMaskPolicy attention_mask_policy = AttentionMaskPolicy::kCausal;
+  // The policy of the local attention mask. Not all models have local attention
+  // mask. If not set, attention mask will be used as the local attentio mask.
+  std::optional<AttentionMaskPolicy> local_attention_mask_policy = std::nullopt;
+  // The sliding window size of the local attention mask. If not set, local
+  // attention mask will be full attention.
+  std::optional<int> sliding_window_size = std::nullopt;
+};
+bool operator==(const AttentionMaskSettings& lhs,
+                const AttentionMaskSettings& rhs);
+std::ostream& operator<<(std::ostream& os, const AttentionMaskPolicy& policy);
+std::ostream& operator<<(std::ostream& os,
+                         const AttentionMaskSettings& settings);
 
 // Optional advanced settings for the LLM executor.
 struct AdvancedSettings {
@@ -394,6 +440,14 @@ class LlmExecutorSettings : public ExecutorSettingsBase {
     advanced_settings_ = advanced_settings;
   }
 
+  const AttentionMaskSettings& GetAttentionMaskSettings() const {
+    return attention_mask_settings_;
+  }
+  void SetAttentionMaskSettings(
+      const AttentionMaskSettings& attention_mask_settings) {
+    attention_mask_settings_ = attention_mask_settings;
+  }
+
   absl::Status SetSupportedLoraRanks(const std::vector<uint32_t>& lora_ranks) {
     if (std::holds_alternative<GpuArtisanConfig>(backend_config_)) {
       std::get<GpuArtisanConfig>(backend_config_).supported_lora_ranks =
@@ -432,6 +486,9 @@ class LlmExecutorSettings : public ExecutorSettingsBase {
 
   // Optional advanced settings.
   std::optional<AdvancedSettings> advanced_settings_;
+
+  // Settings for the attention mask.
+  AttentionMaskSettings attention_mask_settings_ = AttentionMaskSettings();
 
   // Declare the output stream operator as a friend such that it can be used
   // to print the LlmExecutorSettings private member.

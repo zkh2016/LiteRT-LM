@@ -440,6 +440,10 @@ void LogBenchmarkInfo(const litert::lm::BenchmarkInfo& benchmark_info,
       ABSL_LOG(INFO) << absl::StrFormat(
           "%s: %.2f ms", phase.first, absl::ToDoubleMilliseconds(phase.second));
     }
+    for (const auto& mark : benchmark_info.GetMarkDurations()) {
+      ABSL_LOG(INFO) << absl::StrFormat(
+          "%s: %.2f ms", mark.first, absl::ToDoubleMilliseconds(mark.second));
+    }
     ABSL_LOG(INFO) << absl::StrFormat("Time to first token: %.2f s",
                                       benchmark_info.GetTimeToFirstToken());
     for (int i = 0; i < benchmark_info.GetTotalPrefillTurns(); ++i) {

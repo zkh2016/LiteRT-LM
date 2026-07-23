@@ -65,6 +65,7 @@ public class Conversation {
   private let automaticToolCalling: Bool
   private let engine: Engine
   private let enableResponseFormat: Bool
+  private let visualTokenBudget: Int32?
 
   /// Whether the conversation is alive and ready to be used.
   public var isAlive: Bool {
@@ -73,13 +74,14 @@ public class Conversation {
 
   init(
     handle: CConversationHandle, toolManager: ToolManager, automaticToolCalling: Bool = true,
-    engine: Engine, enableResponseFormat: Bool = false
+    engine: Engine, enableResponseFormat: Bool = false, visualTokenBudget: Int32? = nil
   ) {
     self.handle = handle
     self.toolManager = toolManager
     self.automaticToolCalling = automaticToolCalling
     self.engine = engine
     self.enableResponseFormat = enableResponseFormat
+    self.visualTokenBudget = visualTokenBudget
   }
 
   deinit {
@@ -186,7 +188,7 @@ public class Conversation {
     }
     let optionalArgs = litert_lm_conversation_optional_args_create()
     defer { litert_lm_conversation_optional_args_delete(optionalArgs) }
-    if let visualTokenBudget = ExperimentalFlags.visualTokenBudget {
+    if let visualTokenBudget = self.visualTokenBudget ?? ExperimentalFlags.visualTokenBudget {
       litert_lm_conversation_optional_args_set_visual_token_budget(
         optionalArgs, Int32(visualTokenBudget))
     }
@@ -431,7 +433,7 @@ public class Conversation {
 
     let optionalArgs = litert_lm_conversation_optional_args_create()
     defer { litert_lm_conversation_optional_args_delete(optionalArgs) }
-    if let visualTokenBudget = ExperimentalFlags.visualTokenBudget {
+    if let visualTokenBudget = self.visualTokenBudget ?? ExperimentalFlags.visualTokenBudget {
       litert_lm_conversation_optional_args_set_visual_token_budget(
         optionalArgs, Int32(visualTokenBudget))
     }

@@ -91,7 +91,10 @@ pytype_strict_library(
 pytype_strict_library(
     name = "common",
     srcs = ["common.py"],
-    deps = [requirement("click")],
+    deps = [
+        ":config",
+        requirement("click"),
+    ],
     imports = [".."],
 )
 
@@ -149,6 +152,7 @@ py_test(
     srcs = ["config_test.py"],
     tags = ["nowindows"],
     deps = [
+        ":common",
         ":config",
         "@absl_py//absl/testing:absltest",
         "@absl_py//absl/testing:parameterized",
@@ -209,6 +213,7 @@ pytype_strict_library(
     name = "main_lib",
     srcs = ["main.py"],
     deps = [
+        ":common",
         ":help_formatter",
         ":version",
         "//python/litert_lm",

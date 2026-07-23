@@ -185,6 +185,7 @@ public struct ConversationConfig {
   public let thinkingConfig: ThinkingConfig?
   public let automaticToolCalling: Bool
   public let enableResponseFormat: Bool
+  public let visualTokenBudget: Int32?
 
   /// - Parameters:
   ///   - systemMessage: The system message to be used in the conversation.
@@ -209,7 +210,8 @@ public struct ConversationConfig {
     enableToolCallStreaming: Bool = false,
     thinkingConfig: ThinkingConfig? = nil,
     automaticToolCalling: Bool = true,
-    enableResponseFormat: Bool = false
+    enableResponseFormat: Bool = false,
+    visualTokenBudget: Int32? = nil
   ) {
     self.systemMessage = systemMessage.flatMap { msg in
       if msg.toString.isEmpty {
@@ -227,6 +229,7 @@ public struct ConversationConfig {
     self.thinkingConfig = thinkingConfig
     self.automaticToolCalling = automaticToolCalling
     self.enableResponseFormat = enableResponseFormat
+    self.visualTokenBudget = visualTokenBudget
   }
 }
 

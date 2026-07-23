@@ -10,6 +10,8 @@ package(default_visibility = ["//visibility:public"])
 #     name = "LiteRTLMFoundationModels_Swift",
 #     srcs = [
 #         "LiteRTLanguageModel.swift",
+#         "LiteRTSegments.swift",
+#         "CGImagePNG.swift",
 #     ],
 #     copts = ["-enable-testing"],
 #     module_name = "LiteRTLMFoundationModels",
@@ -37,5 +39,25 @@ package(default_visibility = ["//visibility:public"])
 #     minimum_os_version = "12.0",
 #     deps = [
 #         ":LiteRT_LM_FMTest_Lib",
+#     ],
+# )
+#
+# ios_unit_test(
+#     name = "LiteRTLMFoundationModels_Test",
+#     minimum_os_version = "27.0",
+#     deps = [
+#         ":AdapterTests_Lib",
+#     ],
+# )
+#
+# swift_library(
+#     name = "AdapterTests_Lib",
+#     srcs = ["AdapterTests.swift"],
+#     deps = [
+#         ":LiteRTLMFoundationModels_Swift",
+
+
+
+#         "//swift:LiteRT_LM_Swift",
 #     ],
 # )
