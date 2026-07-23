@@ -85,26 +85,22 @@ GetVisionExecutorPropertiesFromModelResources(ModelResources& model_resources) {
 
   LITERT_ASSIGN_OR_RETURN(auto encoder_input_names,
                           vision_encoder_model->GetSignatureInputNames(0));
-  // Deduce the patch shrink factor from the encoder's image input tensor.
-  // Transformer (ViT) encoders expose two inputs (image patches +
-  // positions_xy), while single input encoders (e.g. LFM2 VL) expose only the
-  // image patches tensor. In both cases the image patches tensor is the first
-  // input, so this works as long as the encoder has at least one input.
+  // Deduce patch_num_shrink_factor (input patches per output vision token).
   //
-  // Fused navit+resampler (e.g. MiniCPM-V) is special: the resampler emits a
-  // FIXED num_tokens_per_image regardless of the (variable) patch count, so
-  // num_patches/num_tokens is not constant. For those, derive a static shrink
-  // factor from the positions_xy capacity instead: the data processor pads
-  // num_patches to a multiple of num_tokens_per_image. Note fused models may
-  // carry an extra conditioning input (e.g. vit_positions).
+  // - Typical ViT + separate adapter: image patches are input[0]; shrink =
+  //   input_patches / num_tokens_per_image from that shape.
+  // - Single-input encoders (e.g. LFM2 VL): same formula on the only input.
+  // - Fused encoder (no adapter) with fixed soft-token count (e.g. MiniCPM-V):
+  //   output tokens do not scale with valid patches. Use positions_xy capacity
+  //   / num_tokens_per_image so the data processor can pad L to a multiple of
+  //   the token count. Fused graphs may also take extra inputs (vit_positions).
   if (!encoder_input_names.empty()) {
     LITERT_ASSIGN_OR_RETURN(auto encoder_input_tensor_type,
                             vision_encoder_model->GetInputTensorType(0, 0));
     const bool has_positions_xy =
         absl::c_linear_search(encoder_input_names, "positions_xy");
     if (has_positions_xy && vision_adapter_model == nullptr) {
-      // The positions_xy input is the one whose second-to-last dim is 2 (the
-      // (w,h) coordinate pair); locate it by name rather than assuming index 1.
+      // Locate positions_xy by name (not always input index 1).
       int positions_input_index = -1;
       for (int i = 0; i < static_cast<int>(encoder_input_names.size()); ++i) {
         if (encoder_input_names[i] == "positions_xy") {

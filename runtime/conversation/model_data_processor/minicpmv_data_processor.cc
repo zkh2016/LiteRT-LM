@@ -42,7 +42,8 @@ using nlohmann::ordered_json;
 //   "images"        [1, L, 3*patch*patch] float  (patch-flattened)
 //   "positions_xy"  [1, L, 2] int32             (contiguous (w,h); -1 pad)
 //   "vit_positions" [1, L, 2] int32             (bucketized ViT (w,h); -1 pad)
-// L is padded to kMinicpmvMaxPatchLen so shrink = L/64 always yields 64 tokens.
+// L is padded to kMinicpmvMaxPatchLen so shrink = L / kMinicpmvTokensPerSlice
+// always yields exactly kMinicpmvTokensPerSlice soft tokens per slice.
 // Resampler pos_embed is baked in the graph; only coords are runtime inputs.
 absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
   constexpr int kPatch = kMinicpmvPatchSize;

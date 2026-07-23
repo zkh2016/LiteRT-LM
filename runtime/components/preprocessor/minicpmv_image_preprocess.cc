@@ -170,8 +170,6 @@ std::vector<int64_t> ComputePositionIds(int tgt_h, int tgt_w, int pps) {
   return pos;
 }
 
-// Bilinear/bicubic resize an RGB region using PilResizeBicubicRgb; crops [x0,y0,x1,y1)
-// from src then resizes to (dw,dh).
 }  // namespace
 
 absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(

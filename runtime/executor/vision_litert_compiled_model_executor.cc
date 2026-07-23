@@ -328,18 +328,10 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionAdapter::Initialize() {
 
   LITERT_ASSIGN_OR_RETURN(compiled_model_,
                           CompiledModel::Create(env_, model_.Get(), options));
-  // This check verifies if signature 0 of the adapter model contains any
-  // inputs. This is used to infer whether input buffers should be created at
-  // initialization time (for single-signature models that use signature 0 by
-  // default) or skipped (for multi-signature models like ViT that create
-  // input buffers on-demand in `Encode` for a specific signature). This is a
-  // more direct check than relying on `patch_num_shrink_factor` which was
-  // previously used to detect multi-signature models.
-  // The Vision Adapter model takes the encoder's `features` output and,
-  // optionally, extra conditioning inputs (e.g. a position embedding that some
-  // vision adapters such as MiniCPM-V's resampler consume). The encoder's
-  // `features` output is fed as the adapter's primary input; any remaining
-  // adapter inputs are matched by name against the other encoder outputs.
+  // Create signature-0 input buffers when the adapter has inputs. Single-
+  // signature adapters pre-allocate here; multi-signature adapters create
+  // buffers on-demand in Encode. Adapters may take only `features`, or
+  // additional named tensors matched to encoder outputs at Encode time.
   auto signature_or = model_.GetSignature(0);
   if (signature_or.HasValue() && !signature_or->InputNames().empty()) {
     LITERT_ASSIGN_OR_RETURN(input_buffers_,
@@ -514,9 +506,7 @@ absl::StatusOr<ExecutorVisionData> VisionLiteRtCompiledModelExecutor::Encode(
                                                  vision_executor_properties_,
                                                  num_patches_from_input));
     } else {
-      // Fused navit+resampler encoders emit a fixed number of soft tokens per
-      // image regardless of the (variable) patch count, so they export a
-      // single fixed-length adapter signature. Use signature 0 as-is.
+      // Single-signature adapter: fixed output length, no patch-count dispatch.
       adapter_signature_index = 0;
     }
   }
@@ -628,11 +618,8 @@ absl::StatusOr<ExecutorVisionData> VisionLiteRtCompiledModelExecutor::Encode(
     num_patches = (num_patches_from_input + patch_num_shrink_factor - 1) /
                   patch_num_shrink_factor;
   } else if (vision_executor_properties_.patch_num_shrink_factor.has_value()) {
-    // Fused navit+resampler encoders emit a FIXED number of soft tokens per
-    // image (num_tokens_per_image), independent of the (variable) valid patch
-    // count. Their `mask` output marks VALID patches, so counting it would
-    // wrongly yield the patch count, not the token count. Derive the token
-    // count from the (padded) patch count and the shrink factor instead.
+    // Mask is present but marks valid *patches*, not soft tokens. For fused
+    // fixed-token encoders, token count = ceil(padded_L / shrink) instead.
     LITERT_ASSIGN_OR_RETURN(auto positions_tensor_type,
                             input_maps.at(kPositionsXy).TensorType());
     const int& num_patches_from_input =
@@ -675,10 +662,8 @@ absl::StatusOr<ExecutorVisionData> VisionLiteRtCompiledModelExecutor::Encode(
         vision_adapter_->GetCompiledModel().CreateInputBuffers(
             *adapter_signature_index));
 
-    // Feed the adapter's `features` input with the encoder's features. Any
-    // additional adapter inputs (e.g. a pos_embed that some adapters such as
-    // MiniCPM-V's resampler consume) are matched by name against the other
-    // encoder outputs.
+    // Feed the adapter's `features` input from the encoder. Extra adapter
+    // inputs (if any) are matched by name to other encoder outputs.
     LITERT_ASSIGN_OR_RETURN(
         auto adapter_signature,
         vision_adapter_->GetModel().GetSignature(*adapter_signature_index));
@@ -732,12 +717,9 @@ absl::StatusOr<ExecutorVisionData> VisionLiteRtCompiledModelExecutor::Encode(
     LITERT_ASSIGN_OR_RETURN(auto adapter_output_tensor_type,
                             adapter_output_tensor_buffers[0].TensorType());
 
-    // The embedding size is the last dimension of the adapter output,
-    // regardless of whether the adapter produces a 2-D ([num_tokens,
-    // embedding_size]) or 3-D ([batch_size, num_tokens, embedding_size])
-    // tensor. Take min(num_patches, adapter_output_rows): a fused
-    // navit+resampler encoder may emit more patch-rows than the adapter's
-    // fixed soft-token count (we only need the first num_patches tokens).
+    // Embedding size is the last adapter-output dim (2-D or 3-D layout). Cap
+    // rows at min(requested tokens, adapter capacity) so a longer encoder
+    // feature sequence cannot overrun a fixed-length adapter output.
     const auto& adapter_output_dimensions =
         adapter_output_tensor_type.Layout().Dimensions();
     const int adapter_output_embedding_size =
