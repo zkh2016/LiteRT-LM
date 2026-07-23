@@ -26,12 +26,12 @@
 
 namespace litert::lm {
 
-// Data processor for MiniCPM-V-4 (SigLIP + Resampler + Llama).
+// Data processor for MiniCPM-V-4 multi-slice vision (fused navit+resampler).
 //
-// Baseline: single image, fixed 980x980, no slicing. The prompt marker
-// "(<image>./</image>)" is expanded to "<image>{64 x <unk>}</image>" and each
-// <unk> becomes a vision-embedding placeholder token, which the LLM executor
-// fills with a resampler soft-token row via EmbeddingLookupMultiModal.
+// Replaces the chat-template marker "<image_soft_token>" with the official
+// layout (thumbnail + optional <slice> cells) and one InputImage per slice
+// for stock map-Encode (images / positions_xy / vit_positions -> 64 soft
+// tokens). LLM placeholders are filled via EmbeddingLookupMultiModal.
 class MinicpmvDataProcessor
     : public TypeSafeModelDataProcessor<MinicpmvDataProcessorConfig,
                                         MinicpmvDataProcessorArguments> {

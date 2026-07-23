@@ -309,10 +309,6 @@ absl::StatusOr<std::unique_ptr<Engine>> EngineAdvancedImpl::Create(
   if (engine_settings.GetVisionExecutorSettings().has_value()) {
     vision_executor_settings_ptr = std::make_unique<VisionExecutorSettings>(
         std::move(engine_settings.GetVisionExecutorSettings().value()));
-    // MiniCPM-V runs through the stock VisionLiteRtCompiledModelExecutor: the
-    // fused navit+resampler vision tflite follows the standard
-    // images/positions_xy -> features/mask map-Encode contract, so no bespoke
-    // executor kind is needed.
     if (vision_executor_settings_ptr->GetAdapterBackend() != Backend::CPU) {
       ABSL_LOG(WARNING) << "Vision adapter backend is not CPU, which may cause "
                            "precision loss.";

@@ -14,19 +14,19 @@
 
 #include "runtime/conversation/model_data_processor/minicpmv_data_processor.h"
 
+#include <algorithm>
+#include <fstream>
 #include <memory>
 #include <sstream>
-#include <fstream>
 #include <string>
 #include <vector>
 
-#include "absl/memory/memory.h"       // from @com_google_absl
-#include "absl/status/status.h"       // from @com_google_absl
-#include "absl/status/statusor.h"     // from @com_google_absl
-#include "absl/strings/str_format.h"  // from @com_google_absl
-#include "absl/strings/string_view.h" // from @com_google_absl
-#include "absl/types/span.h"          // from @com_google_absl
-#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/memory/memory.h"            // from @com_google_absl
+#include "absl/status/status.h"            // from @com_google_absl
+#include "absl/status/statusor.h"          // from @com_google_absl
+#include "absl/strings/str_format.h"       // from @com_google_absl
+#include "absl/types/span.h"               // from @com_google_absl
 #include "runtime/components/preprocessor/minicpmv_image_preprocess.h"
 #include "runtime/conversation/model_data_processor/multimodal_processor_helper.h"
 #include "runtime/util/convert_tensor_buffer.h"
@@ -37,20 +37,20 @@ namespace {
 
 using nlohmann::ordered_json;
 
-// Builds a single-slice TensorBufferMap InputImage from one preprocessed slice,
-// in the stock VisionLiteRtCompiledModelExecutor map-Encode contract:
-//   "images"       [1, num_patches, 3*patch*patch]  (patch-flattened, float)
-//   "positions_xy" [1, num_patches, 2]              (int32; bucketized (w,h))
-// The fused vision tflite (navit SigLIP + Resampler, pos_embed baked) turns one
-// such slice directly into 64 vision soft tokens, so each InputImage -> 64.
+// Pack one preprocessed slice into the stock map-Encode InputImage contract
+// used by VisionLiteRtCompiledModelExecutor for the fused vision tflite:
+//   "images"        [1, L, 3*patch*patch] float  (patch-flattened)
+//   "positions_xy"  [1, L, 2] int32             (contiguous (w,h); -1 pad)
+//   "vit_positions" [1, L, 2] int32             (bucketized ViT (w,h); -1 pad)
+// L is padded to kMinicpmvMaxPatchLen so shrink = L/64 always yields 64 tokens.
+// Resampler pos_embed is baked in the graph; only coords are runtime inputs.
 absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
   constexpr int kPatch = kMinicpmvPatchSize;
+  constexpr int kPps = kMinicpmvNumPatchesPerSide;
   const int num_patches = sl.num_patches;
   const int patch_dim = 3 * kPatch * kPatch;
   // strip is [3, patch, num_patches*patch] (channel, py, patch*patch_w+px).
-  // Rearrange to [num_patches, 3*patch*patch] (patch, channel, py, px), which
-  // is the conv weight layout flattened the fused model's linear patch-embed
-  // expects.
+  // Rearrange to [num_patches, 3*patch*patch] for the fused linear patch embed.
   std::vector<float> images(static_cast<size_t>(num_patches) * patch_dim);
   const int strip_w = num_patches * kPatch;
   for (int p = 0; p < num_patches; ++p) {
@@ -66,22 +66,22 @@ absl::StatusOr<InputImage> BuildSliceImage(const MinicpmvSlice& sl) {
       }
     }
   }
-  // positions_xy: CONTIGUOUS per-patch grid coords (w,h) for the resampler's
-  // pos_embed; padded rows are -1. (The ViT's bucketized ids live in
-  // "vit_positions"; the fused model uses each where appropriate.)
+  // Contiguous (w,h) for the baked resampler table gather; pad rows are (-1,-1).
+  // Valid rows use the slice's own tgt grid (row-major: col = i % tgt_w).
+  // vit_positions hold bucketized 70x70 coords for the ViT absolute pos embed.
   std::vector<int32_t> positions_xy(static_cast<size_t>(num_patches) * 2);
   std::vector<int32_t> vit_positions(static_cast<size_t>(num_patches) * 2);
-  constexpr int kPps = kMinicpmvNumPatchesPerSide;
+  const int tgt_w = sl.tgt_w > 0 ? sl.tgt_w : 1;
   for (int i = 0; i < num_patches; ++i) {
-    const int64_t id = sl.position_ids[i];  // bucketized 70x70 linear id (or -1)
+    const int64_t id = sl.position_ids[i];
     if (id < 0) {
       positions_xy[static_cast<size_t>(i) * 2 + 0] = -1;
       positions_xy[static_cast<size_t>(i) * 2 + 1] = -1;
       vit_positions[static_cast<size_t>(i) * 2 + 0] = -1;
       vit_positions[static_cast<size_t>(i) * 2 + 1] = -1;
     } else {
-      positions_xy[static_cast<size_t>(i) * 2 + 0] = sl.grid_w[i];
-      positions_xy[static_cast<size_t>(i) * 2 + 1] = sl.grid_h[i];
+      positions_xy[static_cast<size_t>(i) * 2 + 0] = i % tgt_w;
+      positions_xy[static_cast<size_t>(i) * 2 + 1] = i / tgt_w;
       vit_positions[static_cast<size_t>(i) * 2 + 0] =
           static_cast<int32_t>(id % kPps);
       vit_positions[static_cast<size_t>(i) * 2 + 1] =
@@ -133,64 +133,52 @@ MinicpmvDataProcessor::ToInputDataVectorImpl(
     const std::string& rendered_template_prompt,
     const ordered_json& messages,
     const MinicpmvDataProcessorArguments& args) const {
-  // MiniCPM-V wraps each image as <image>{N x <unk>}</image>. We match the
-  // "<image>" boundary as the image token; the actual number of vision
-  // placeholder tokens is set downstream from the resampler output count.
-  // The chat template (kMinicpmv case in model_type_utils.cc) renders each
-  // image content item as the literal string "<image_soft_token>". We must
-  // match THAT token (not "<image>") so ProcessMultimodalPrompt replaces it
-  // with the N vision placeholder (-1) tokens; otherwise the literal string
-  // leaks into the LLM input and is echoed back. Matches fastvlm's config.
-  // MiniCPM-V wraps the image placeholders as:  <image>{64 x -1}</image>
-  // The kMinicpmv chat template renders each image content item as the literal
-  // "<image_soft_token>"; we match that as the image token and surround it with
-  // the real MiniCPM markers <image>/</image> (tokenized as text). The matched
-  // token is replaced downstream by N vision placeholder (-1) tokens = the
-  // resampler output row count (64), which the embedding splice fills with the
-  // vision features. NOTE: <image_soft_token> is NOT a MiniCPM vocab token; it
-  // is only a boundary marker consumed here, never tokenized.
-  // Multi-slice: emit the official structured layout with per-slice InputImages.
-  //   <image_id>0</image_id><image>{thumbnail 64}</image>
-  //   [<slice>{64}</slice> per sub-image, grid row-major, rows joined by \n]
-  // Each InputImage is a single-slice map -> executor Encode(map) yields 64
-  // vision (-1) placeholder tokens, spliced in emit order (thumbnail first).
+  // Chat template (model_type_utils kMinicpmv) renders each image as the
+  // literal "<image_soft_token>". That is only a boundary marker (not a vocab
+  // token): we replace it with the official multi-slice layout
+  //   <image_id>0</image_id><image>{64 placeholders}</image>
+  //   [<slice>{64}</slice>...]
+  // and ProcessMultimodalPrompt turns each InputImage into 64 vision (-1)
+  // tokens that the embedding splice fills from the fused encoder.
 
-  // 1. Extract the raw image bytes from messages (first image content item).
+  // 1. First image content item (path or bytes).
   std::string image_bytes;
   for (const auto& message : messages) {
-    if (!message.contains("content") || !message["content"].is_array()) continue;
-    for (const auto& item : message["content"]) {
-      if (item.is_object() && item.contains("type") && item["type"] == "image") {
-        if (item.contains("path")) {
-          std::ifstream f(item["path"].get<std::string>(), std::ios::binary);
-          std::ostringstream ss; ss << f.rdbuf(); image_bytes = ss.str();
-        } else if (item.contains("bytes")) {
-          image_bytes = item["bytes"].get<std::string>();
-        }
-        break;
-      }
+    if (!message.contains("content") || !message["content"].is_array()) {
+      continue;
     }
-    if (!image_bytes.empty()) break;
+    for (const auto& item : message["content"]) {
+      if (!item.is_object() || !item.contains("type") ||
+          item["type"] != "image") {
+        continue;
+      }
+      if (item.contains("path")) {
+        std::ifstream f(item["path"].get<std::string>(), std::ios::binary);
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        image_bytes = ss.str();
+      } else if (item.contains("bytes")) {
+        image_bytes = item["bytes"].get<std::string>();
+      }
+      break;
+    }
+    if (!image_bytes.empty()) {
+      break;
+    }
   }
   if (image_bytes.empty()) {
     return absl::InvalidArgumentError("MiniCPM-V: no image bytes in messages.");
   }
 
-  // 2. Slice.
+  // 2. Slice + pad each strip to the fused signature length.
+  // map-Encode token count is ceil(L / shrink) with shrink = L /
+  // kMinicpmvTokensPerSlice (= 17), so L=1088 always yields 64 soft tokens.
+  // strip is [3, patch, num_patches*patch]; widening must re-pack rows (a flat
+  // resize keeps the old stride and would mis-read later channels).
   MinicpmvSliceConfig scfg;
-  ASSIGN_OR_RETURN(MinicpmvSliced sliced, PreprocessImageSliced(image_bytes, scfg));
+  ASSIGN_OR_RETURN(MinicpmvSliced sliced,
+                   PreprocessImageSliced(image_bytes, scfg));
   const int gx = sliced.grid_x, gy = sliced.grid_y;
-
-  // Pad every slice to the fused vision signature length (kMinicpmvMaxPatchLen).
-  // The stock map-Encode derives tokens as ceil(num_patches / shrink) with
-  // shrink = signature_capacity / num_tokens_per_image (= 1088/64 = 17), so
-  // padding to 1088 always yields exactly 64 soft tokens per slice. Padded
-  // rows use positions_xy = -1 and are ignored by the fused model's valid mask.
-  //
-  // Important: strip is [3, patch, num_patches*patch] row-major. Simply
-  // resizing the flat buffer keeps the OLD row stride, so BuildSliceImage
-  // (which indexes with the NEW wider stride) would mis-read every channel
-  // after the first. Re-pack into a wider strip explicitly.
   for (auto& sl : sliced.slices) {
     const int np = sl.num_patches;
     const int padded = kMinicpmvMaxPatchLen;
@@ -211,18 +199,20 @@ MinicpmvDataProcessor::ToInputDataVectorImpl(
       }
       sl.strip = std::move(wide);
       sl.num_patches = padded;
-      sl.position_ids.resize(padded, -1);  // -1 -> positions_xy (-1,-1) -> pad
-      sl.grid_w.resize(padded, 0);
-      sl.grid_h.resize(padded, 0);
+      // Keep tgt_w for contiguous positions_xy; pad rows get position_ids=-1.
+      sl.position_ids.resize(padded, -1);
     }
   }
 
-  // 3. Split the rendered prompt at the single <image_soft_token> marker.
+  // 3. Split the rendered prompt at the single soft-token marker.
   std::string rendered(rendered_template_prompt);
   const std::string marker = "<image_soft_token>";
-  size_t mpos = rendered.find(marker);
-  std::string pre = (mpos == std::string::npos) ? rendered : rendered.substr(0, mpos);
-  std::string post = (mpos == std::string::npos) ? "" : rendered.substr(mpos + marker.size());
+  const size_t mpos = rendered.find(marker);
+  const std::string pre =
+      (mpos == std::string::npos) ? rendered : rendered.substr(0, mpos);
+  const std::string post = (mpos == std::string::npos)
+                               ? ""
+                               : rendered.substr(mpos + marker.size());
 
   // 4. Build interleaved InputData.
   std::vector<InputData> out;

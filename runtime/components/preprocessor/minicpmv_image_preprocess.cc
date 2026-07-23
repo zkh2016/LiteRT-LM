@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #include "runtime/components/preprocessor/minicpmv_image_preprocess.h"
-#include "runtime/components/preprocessor/minicpmv_pos_embed.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <utility>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"       // from @com_google_absl
@@ -230,12 +229,9 @@ absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(
     }
   }
 
-  // Compute the [pps, pps, model_dim] 2D sin-cos pos_embed table analytically
-  // (identical to model.resampler.pos_embed, verified bit-exact). Replaces
-  // loading a 50MB external .bin; pure function of (model_dim, pps), no weight
-  // dependency. ~55ms, computed once per PreprocessImageSliced call.
-  const int pps = cfg.num_patches_per_side, D = cfg.model_dim;
-  const std::vector<float> table = Compute2dSincosPosEmbed(D, pps, pps);
+  // Fused vision bakes the resampler 2D sin-cos pos table; runtime only needs
+  // per-patch coords (built in the data processor) and ViT bucketized ids.
+  const int pps = cfg.num_patches_per_side;
   for (size_t s = 0; s < slice_rgb.size(); ++s) {
     const int sw = slice_wh[s].first, sh = slice_wh[s].second;
     MinicpmvSlice sl;
@@ -245,22 +241,6 @@ absl::StatusOr<MinicpmvSliced> PreprocessImageSliced(
     sl.strip = NormalizeAndReshapeByPatch(slice_rgb[s], sw, sh, patch,
                                           cfg.norm_mean, cfg.norm_std);
     sl.position_ids = ComputePositionIds(sl.tgt_h, sl.tgt_w, pps);
-    // Contiguous per-patch grid coords (col,row); the resampler pos_embed uses
-    // these (table[:tgt_h,:tgt_w]) while the ViT uses the bucketized ids above.
-    sl.grid_w.resize(sl.num_patches);
-    sl.grid_h.resize(sl.num_patches);
-    for (int i = 0; i < sl.num_patches; ++i) {
-      sl.grid_w[i] = i % sl.tgt_w;
-      sl.grid_h[i] = i / sl.tgt_w;
-    }
-    // pos_embed = table[:tgt_h, :tgt_w].reshape(num_patches, D), row-major.
-    sl.pos_embed.resize(static_cast<size_t>(sl.num_patches) * D);
-    for (int r = 0; r < sl.tgt_h; ++r)
-      for (int cc = 0; cc < sl.tgt_w; ++cc) {
-        const float* src = &table[(static_cast<size_t>(r) * pps + cc) * D];
-        float* dst = &sl.pos_embed[(static_cast<size_t>(r) * sl.tgt_w + cc) * D];
-        std::copy(src, src + D, dst);
-      }
     result.slices.push_back(std::move(sl));
   }
   return result;

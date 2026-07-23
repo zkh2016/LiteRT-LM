@@ -61,15 +61,9 @@ alias(
     actual = "@litert//support/preprocessor:image_preprocessor_utils",
 )
 
-# MiniCPM-V vision preprocessing (stdlib-only PIL-faithful resize + normalize)
-# and the resampler 2D sin-cos position embedding.
-
-cc_library(
-    name = "minicpmv_pos_embed",
-    srcs = ["minicpmv_pos_embed.cc"],
-    hdrs = ["minicpmv_pos_embed.h"],
-    deps = ["@com_google_absl//absl/base:core_headers"],
-)
+# MiniCPM-V multi-slice vision preprocessing (PIL-faithful bicubic resize +
+# normalize + reshape_by_patch). Resampler pos_embed is baked into the fused
+# vision tflite; this target only produces image strips and ViT position ids.
 
 cc_library(
     name = "pil_resize",
@@ -83,7 +77,6 @@ cc_library(
     srcs = ["minicpmv_image_preprocess.cc"],
     hdrs = ["minicpmv_image_preprocess.h"],
     deps = [
-        ":minicpmv_pos_embed",
         ":pil_resize",
         # stb_image.h declarations; the STB_IMAGE_IMPLEMENTATION symbols come
         # from :stb_image_preprocessor (the single TU that compiles them).
